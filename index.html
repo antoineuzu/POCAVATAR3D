@@ -133,7 +133,7 @@ let extractedBonesList = [];
 const loader = new THREE.GLTFLoader();
 
 // Chargement direct du Xbot depuis le dépôt GitHub via jsDelivr
-loader.load('https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/models/gltf/Xbot.glb', (gltf) => {
+loader.load('./Xbot.glb', (gltf) => {
     const model = gltf.scene;
     
     const shinyMaterial = new THREE.MeshStandardMaterial({
