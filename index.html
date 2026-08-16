@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>POC Hdance - Debug Squelette GLB</title>
+    <title>POC Hdance - Skin Rebinding Fix</title>
     <style>
         body, html { 
             margin: 0; padding: 0; height: 100%; 
@@ -18,18 +18,15 @@
         #canvas-container { flex: 1; position: relative; background: #1a1a1a; }
         #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #00ffcc; font-weight: bold; font-size: 1.2rem; pointer-events: none; text-align: center; }
 
-        #bottom-half { height: 320px; display: flex; background: #0a0a0a; }
+        #bottom-half { height: 280px; display: flex; background: #0a0a0a; }
         #controls-panel { width: 340px; padding: 15px; border-right: 2px solid #333; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
         .slider-group { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #00ffcc; }
         input[type=range] { cursor: pointer; width: 100%; }
         
-        .btn-action { background: #00ffcc; color: #000; padding: 6px; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; font-size: 11px; }
+        .btn-action { background: #00ffcc; color: #000; padding: 8px; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; font-size: 12px; }
         .btn-action:hover { background: #00cca3; }
-        .btn-debug { background: #ffaa00; color: #000; }
-        
-        select { background: #222; color: #00ffcc; border: 1px solid #00ffcc; padding: 6px; font-weight: bold; border-radius: 4px; outline: none; cursor: pointer; font-size: 11px; }
 
-        #log-panel { flex: 1; padding: 12px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 11px; color: #00ff66; white-space: pre-wrap; line-height: 1.3; background: #050505; }
+        #log-panel { flex: 1; padding: 12px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 12px; color: #00ff66; white-space: pre-wrap; line-height: 1.4; background: #050505; }
     </style>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -44,38 +41,24 @@
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
     <div id="canvas-container">
-        <div id="loading">Chargement POC...<br><span id="loading-details" style="font-size: 0.8rem; color: #aaa;"></span></div>
+        <div id="loading">Application du patch Skinning...<br><span id="loading-details" style="font-size: 0.8rem; color: #aaa;"></span></div>
     </div>
 </div>
 
 <div id="bottom-half">
     <div id="controls-panel">
-        <h3 style="margin:0; color:#fff; border-bottom:1px solid #333; padding-bottom:5px; font-size:14px;">🛠 Banc d'Essai (POC)</h3>
+        <h3 style="margin:0; color:#fff; border-bottom:1px solid #333; padding-bottom:5px; font-size:14px;">🛠 Réglages</h3>
         
-        <select id="test-selector">
-            <option value="1">Test 1: Classic LookAt (Base)</option>
-            <option value="2" selected>Test 2: Local Quat Inverse</option>
-            <option value="3">Test 3: Global Quat Brut</option>
-            <option value="4">Test 4: BindMode Attached + Skin Update</option>
-            <option value="5">Test 5: MatrixAutoUpdate False</option>
-            <option value="6">Test 6: Skeleton Pose Reset Loop</option>
-            <option value="7">Test 7: Euler Rotation Directe</option>
-            <option value="8">Test 8: Full Scene Traverse Update</option>
-            <option value="9">Test 9: Override Local Matrix</option>
-            <option value="10">Test 10: Dynamic Re-bind Skeleton</option>
-        </select>
-
-        <button id="btn-force-play" class="btn-action">▶ Forcer la lecture 3D</button>
+        <button id="btn-force-play" class="btn-action">▶ Démarrer Animation 3D</button>
         <button id="toggle-debug-ia" class="btn-action" style="background:#444; color:#fff;">👁 Masquer IA (Rouge/Vert)</button>
-        <button id="toggle-debug-glb" class="btn-action btn-debug">🦴 Afficher Os GLB (Jaune)</button>
-        <button id="toggle-mesh" class="btn-action" style="background:#2288cc; color:#fff;">👻 Masquer Peau Bleue</button>
+        <button id="toggle-debug-glb" class="btn-action" style="background:#ffaa00; color:#000;">🦴 Afficher Os (Lignes)</button>
         
-        <div class="slider-group" style="margin-top: 5px;">
+        <div class="slider-group" style="margin-top: 10px;">
             <label for="camZ">Zoom : <span id="valZ">3.0</span>m</label>
             <input type="range" id="camZ" min="0.5" max="10" step="0.1" value="3.0">
         </div>
     </div>
-    <div id="log-panel">Initialisation du diagnostic système...</div>
+    <div id="log-panel">Attente du chargement...</div>
 </div>
 
 <script>
@@ -91,27 +74,26 @@ const BONE_KEYWORDS = {
 };
 
 // ==========================================
-// 2. SCÈNE 3D
+// 2. SCÈNE 3D & WRAPPER
 // ==========================================
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
-camera.position.set(0, 0.5, 3.0);
+camera.position.set(0, 1.0, 3.5);
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setSize(container.clientWidth, container.clientHeight);
 container.appendChild(renderer.domElement);
 
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 0.5, 0);
+controls.target.set(0, 1.0, 0);
 controls.update();
 
-scene.add(new THREE.AmbientLight(0x404050, 1.2));
-const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
+scene.add(new THREE.AmbientLight(0x404050, 1.5));
+const keyLight = new THREE.DirectionalLight(0xffffff, 1.5);
 keyLight.position.set(3, 5, 4);
 scene.add(keyLight);
 scene.add(new THREE.GridHelper(10, 10, 0x00ffcc, 0x333333));
 
-// Sphères IA (Rouge/Vert)
 const debugSpheresIA = [];
 const sphereGeoIA = new THREE.SphereGeometry(0.025, 16, 16);
 const matRed = new THREE.MeshBasicMaterial({ color: 0xff0000 });
@@ -124,18 +106,17 @@ for(let i=0; i<21; i++) {
 }
 
 // ==========================================
-// 3. CHARGEMENT ET DEBUG OS
+// 3. CHARGEMENT & REBINDING NUCLÉAIRE
 // ==========================================
-let avatarModel = null, avatarBones = {}, skinnedMeshes = [], skeletonRef = null;
+let avatarModel = null, avatarBones = {}, skinnedMeshes = [];
 let isModelLoaded = false, isJsonLoaded = false;
-let currentMethod = 2; 
-
-// Outils de debug GLB
 let glbSkeletonHelper = null;
-const boneSpheres = [];
-
 const logPanel = document.getElementById('log-panel');
-let sysLogs = "=== CHARGEMENT ===\n";
+let sysLogs = "=== ETAT DU CHARGEMENT ===\n";
+
+// Conteneur global pour éviter de casser les matrices internes du GLB en le déplaçant
+const avatarContainer = new THREE.Group();
+scene.add(avatarContainer);
 
 new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     avatarModel = gltf.scene;
@@ -146,7 +127,6 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
             child.material = new THREE.MeshStandardMaterial({ color: 0x0088cc, roughness: 0.3 });
             if (child.isSkinnedMesh) {
                 skinnedMeshes.push(child);
-                skeletonRef = child.skeleton;
             }
         }
     });
@@ -158,29 +138,34 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
         if(match) avatarBones[logic] = match;
     }
 
-    // AJOUT DES MARQUEURS JAUNES SUR LES OS
-    const boneSphereGeo = new THREE.SphereGeometry(0.05, 8, 8); // 5cm
-    const boneSphereMat = new THREE.MeshBasicMaterial({ 
-        color: 0xffff00, 
-        depthTest: false, // Permet de voir la sphère à travers la peau bleue
-        transparent: true,
-        opacity: 0.8
+    // 🔴 PATCH REBINDING NUCLÉAIRE 🔴
+    // On force Three.js à recalculer l'attachement de la peau aux os
+    avatarModel.updateMatrixWorld(true);
+    skinnedMeshes.forEach(mesh => {
+        if (mesh.skeleton) {
+            // Recréer un squelette propre et l'attacher fermement
+            const cleanSkeleton = new THREE.Skeleton(mesh.skeleton.bones);
+            cleanSkeleton.calculateInverses();
+            mesh.bind(cleanSkeleton, mesh.matrixWorld);
+            mesh.normalizeSkinWeights();
+        }
     });
 
-    for (const bone of Object.values(avatarBones)) {
-        const marker = new THREE.Mesh(boneSphereGeo, boneSphereMat);
-        marker.visible = false;
-        bone.add(marker); // Attaché DIRECTEMENT à l'os
-        boneSpheres.push(marker);
-    }
-
-    // AJOUT DU SKELETON HELPER (Lignes)
     glbSkeletonHelper = new THREE.SkeletonHelper(avatarModel);
     glbSkeletonHelper.visible = false;
     scene.add(glbSkeletonHelper);
 
-    avatarModel.scale.set(0.01, 0.01, 0.01);
-    scene.add(avatarModel);
+    // Ajout au conteneur au lieu de la scène directe
+    avatarContainer.add(avatarModel);
+    
+    // Normalisation de la taille sur le conteneur
+    const bbox = new THREE.Box3().setFromObject(avatarModel);
+    const size = bbox.getSize(new THREE.Vector3());
+    if (size.y > 0) {
+        const scaleFactor = 1.7 / size.y;
+        avatarContainer.scale.set(scaleFactor, scaleFactor, scaleFactor);
+    }
+    
     isModelLoaded = true;
     checkReady();
 });
@@ -201,84 +186,35 @@ fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
 function checkReady() {
     if (isModelLoaded && isJsonLoaded) {
         document.getElementById('loading').style.display = 'none';
+        sysLogs += "✔ Patch Skinning appliqué.\n✔ Prêt à animer.";
+        logPanel.innerText = sysLogs;
     }
 }
 
 // ==========================================
-// 4. MOTEUR DES 10 TESTS
+// 4. MOTEUR D'ANIMATION
 // ==========================================
 function getMetricPoint(frame, k) {
     const idx = 133 + (k * 3);
     return new THREE.Vector3(frame[idx], -frame[idx+1], -frame[idx+2]);
 }
 
-document.getElementById('test-selector').addEventListener('change', (e) => {
-    currentMethod = parseInt(e.target.value);
-    sysLogs = `⚠️ Méthode changée : Test ${currentMethod}\n`;
-});
-
-function applyTestLogic(bone, startPos, endPos, axis, method) {
+function applyRotation(bone, startPos, endPos, axis) {
     if(!bone || !startPos || !endPos) return;
     
     const dir = new THREE.Vector3().subVectors(endPos, startPos).normalize();
     const targetQuat = new THREE.Quaternion().setFromUnitVectors(axis, dir);
 
-    switch(method) {
-        case 1:
-            const targetPos = new THREE.Vector3().addVectors(bone.getWorldPosition(new THREE.Vector3()), dir);
-            bone.lookAt(targetPos);
-            bone.updateMatrixWorld(true);
-            break;
-        case 2:
-        case 4:
-            if (bone.parent) {
-                bone.parent.updateMatrixWorld(true);
-                const pQuat = new THREE.Quaternion();
-                bone.parent.getWorldQuaternion(pQuat);
-                targetQuat.premultiply(pQuat.invert());
-            }
-            bone.quaternion.copy(targetQuat);
-            bone.updateMatrixWorld(true);
-            break;
-        case 3:
-            bone.quaternion.copy(targetQuat);
-            bone.updateMatrixWorld(true);
-            break;
-        case 5:
-            bone.matrixAutoUpdate = false;
-            if (bone.parent) {
-                bone.parent.updateMatrixWorld(true);
-                const pQuat = new THREE.Quaternion();
-                bone.parent.getWorldQuaternion(pQuat);
-                targetQuat.premultiply(pQuat.invert());
-            }
-            bone.quaternion.copy(targetQuat);
-            bone.updateMatrix();
-            bone.matrixWorldNeedsUpdate = true;
-            break;
-        case 6:
-            if (skeletonRef) skeletonRef.pose();
-            bone.quaternion.copy(targetQuat);
-            bone.updateMatrixWorld(true);
-            break;
-        case 7:
-            const euler = new THREE.Euler().setFromQuaternion(targetQuat, 'XYZ');
-            bone.rotation.set(euler.x, euler.y, euler.z);
-            bone.updateMatrixWorld(true);
-            break;
-        case 8:
-            bone.quaternion.copy(targetQuat);
-            break;
-        case 9:
-            bone.matrixAutoUpdate = false;
-            bone.matrix.makeRotationFromQuaternion(targetQuat);
-            bone.matrixWorldNeedsUpdate = true;
-            break;
-        case 10:
-            bone.quaternion.copy(targetQuat);
-            bone.updateMatrixWorld(true);
-            break;
+    // Calcul Local Inverse (Méthode 2 qui fonctionnait pour tes os)
+    if (bone.parent) {
+        bone.parent.updateMatrixWorld(true);
+        const pQuat = new THREE.Quaternion();
+        bone.parent.getWorldQuaternion(pQuat);
+        targetQuat.premultiply(pQuat.invert());
     }
+    
+    bone.quaternion.copy(targetQuat);
+    bone.updateMatrixWorld(true);
 }
 
 function applyPose(frame) {
@@ -292,36 +228,28 @@ function applyPose(frame) {
     const midHip = new THREE.Vector3().addVectors(getMetricPoint(frame, 11), getMetricPoint(frame, 12)).multiplyScalar(0.5);
     const midShoulder = new THREE.Vector3().addVectors(getMetricPoint(frame, 3), getMetricPoint(frame, 4)).multiplyScalar(0.5);
 
-    if(avatarModel) avatarModel.position.copy(midHip);
+    // On déplace le conteneur global, pas le modèle GLB lui-même
+    avatarContainer.position.copy(midHip);
 
     const axisY = new THREE.Vector3(0, 1, 0);
     const axisX = new THREE.Vector3(1, 0, 0);
     const axisNX = new THREE.Vector3(-1, 0, 0);
 
-    applyTestLogic(avatarBones.spine, midHip, midShoulder, axisY, currentMethod);
-    applyTestLogic(avatarBones.neck, midShoulder, getMetricPoint(frame, 0), axisY, currentMethod);
-    applyTestLogic(avatarBones.leftShoulder, getMetricPoint(frame, 3), getMetricPoint(frame, 5), axisX, currentMethod);
-    applyTestLogic(avatarBones.rightShoulder, getMetricPoint(frame, 4), getMetricPoint(frame, 6), axisNX, currentMethod);
-    applyTestLogic(avatarBones.leftElbow, getMetricPoint(frame, 5), getMetricPoint(frame, 7), axisX, currentMethod);
-    applyTestLogic(avatarBones.rightElbow, getMetricPoint(frame, 6), getMetricPoint(frame, 8), axisNX, currentMethod);
+    applyRotation(avatarBones.spine, midHip, midShoulder, axisY);
+    applyRotation(avatarBones.neck, midShoulder, getMetricPoint(frame, 0), axisY);
+    applyRotation(avatarBones.leftShoulder, getMetricPoint(frame, 3), getMetricPoint(frame, 5), axisX);
+    applyRotation(avatarBones.rightShoulder, getMetricPoint(frame, 4), getMetricPoint(frame, 6), axisNX);
+    applyRotation(avatarBones.leftElbow, getMetricPoint(frame, 5), getMetricPoint(frame, 7), axisX);
+    applyRotation(avatarBones.rightElbow, getMetricPoint(frame, 6), getMetricPoint(frame, 8), axisNX);
 
-    if (currentMethod === 4) {
-        skinnedMeshes.forEach(m => { m.bindMode = 'attached'; if(m.skeleton) m.skeleton.update(); });
-    }
-    if (currentMethod === 8) {
-        scene.traverse(c => { if(c.updateMatrixWorld) c.updateMatrixWorld(true); });
-    }
-    if (currentMethod === 10 && skeletonRef && skinnedMeshes[0]) {
-        skinnedMeshes.forEach(m => m.bind(new THREE.Skeleton(skeletonRef.bones)));
-    }
+    // Force la mise à jour de la peau après rotation
+    skinnedMeshes.forEach(m => {
+        if(m.skeleton) m.skeleton.update();
+    });
     
-    // Update l'aide visuelle des os
     if(glbSkeletonHelper) glbSkeletonHelper.update();
 }
 
-// ==========================================
-// 5. ANIMATION LOOP
-// ==========================================
 function animate() {
     requestAnimationFrame(animate);
 
@@ -331,7 +259,9 @@ function animate() {
         
         if (frame) {
             applyPose(frame);
-            logPanel.innerText = `[TEST ACTIF : ${currentMethod}]\nTemps: ${currentVideoTime.toFixed(2)}s\n` + sysLogs + `\n💡 ASTUCE: Cliquez sur "Afficher Os GLB" pour voir si le squelette jaune bouge à l'intérieur de la peau bleue.`;
+            if(Math.floor(currentVideoTime * 10) % 5 === 0) {
+                logPanel.innerText = `▶ Animation Active (Temps: ${currentVideoTime.toFixed(2)}s)\nSi la peau bleue suit les os, le rebinding a fonctionné !`;
+            }
         }
     }
     renderer.render(scene, camera);
@@ -339,11 +269,12 @@ function animate() {
 animate();
 
 // ==========================================
-// 6. EVENT LISTENERS
+// 5. EVENT LISTENERS
 // ==========================================
 document.getElementById('btn-force-play').addEventListener('click', () => {
     isManualPlaying = !isManualPlaying;
     if(isManualPlaying) manualStartTime = Date.now() - (currentVideoTime * 1000);
+    document.getElementById('btn-force-play').innerText = isManualPlaying ? "⏸ Pause 3D" : "▶ Démarrer Animation 3D";
 });
 
 let showIA = true;
@@ -357,15 +288,7 @@ let showGLB = false;
 document.getElementById('toggle-debug-glb').addEventListener('click', (e) => {
     showGLB = !showGLB;
     if(glbSkeletonHelper) glbSkeletonHelper.visible = showGLB;
-    boneSpheres.forEach(s => s.visible = showGLB);
-    e.target.innerText = showGLB ? "🦴 Masquer Os GLB" : "🦴 Afficher Os GLB (Jaune)";
-});
-
-let showMesh = true;
-document.getElementById('toggle-mesh').addEventListener('click', (e) => {
-    showMesh = !showMesh;
-    skinnedMeshes.forEach(m => m.visible = showMesh);
-    e.target.innerText = showMesh ? "👻 Masquer Peau Bleue" : "👻 Afficher Peau Bleue";
+    e.target.innerText = showGLB ? "🦴 Masquer Os (Lignes)" : "🦴 Afficher Os (Lignes)";
 });
 
 document.getElementById('camZ').addEventListener('input', (e) => { camera.position.z = e.target.value; });
