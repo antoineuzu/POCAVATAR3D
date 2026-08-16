@@ -11,10 +11,20 @@
             display: flex; overflow: hidden;
         }
         
-        /* Colonne de gauche : Média & 3D */
+        /* Colonne de gauche : Contrôles, Média & 3D */
         #left-col { 
             flex: 2; display: flex; flex-direction: column; 
         }
+
+        /* Panneau de contrôles (Curseurs) */
+        #controls-panel {
+            background: #222; padding: 15px; display: flex; justify-content: center; gap: 30px;
+            border-bottom: 2px solid #333; font-size: 14px;
+        }
+        .slider-group {
+            display: flex; align-items: center; gap: 10px;
+        }
+        input[type=range] { cursor: pointer; }
         
         #video-container { 
             flex: 1; background: #000; border-bottom: 2px solid #333; 
@@ -48,8 +58,20 @@
 </head>
 <body>
 
-<!-- GAUCHE : LECTEUR ET 3D -->
+<!-- GAUCHE : CONTRÔLES, LECTEUR ET 3D -->
 <div id="left-col">
+    <!-- Barre de réglages de la caméra -->
+    <div id="controls-panel">
+        <div class="slider-group">
+            <label for="camZ">Zoom (Profondeur) :</label>
+            <input type="range" id="camZ" min="2" max="15" step="0.5" value="8">
+        </div>
+        <div class="slider-group">
+            <label for="targetY">Hauteur (Cadrage) :</label>
+            <input type="range" id="targetY" min="-2" max="4" step="0.1" value="1.5">
+        </div>
+    </div>
+
     <div id="video-container">
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
@@ -71,16 +93,16 @@
 // ==========================================
 // 1. CONFIGURATION & MAPPING
 // ==========================================
+// Mapping exact avec la liste fournie
 const BONE_MAPPING = {
-    // ⚠️ Remplace ces valeurs par les noms qui s'afficheront dans le panneau "Liste des os du GLB"
-    leftShoulder: "mixamorigLeftArm", 
-    rightShoulder: "mixamorigRightArm",
-    leftElbow: "mixamorigLeftForeArm",
-    rightElbow: "mixamorigRightForeArm",
-    leftHip: "mixamorigLeftUpLeg",
-    rightHip: "mixamorigRightUpLeg",
-    leftKnee: "mixamorigLeftLeg",
-    rightKnee: "mixamorigRightLeg"
+    leftShoulder: "mixamorigLeftArm_09", 
+    rightShoulder: "mixamorigRightArm_033",
+    leftElbow: "mixamorigLeftForeArm_010",
+    rightElbow: "mixamorigRightForeArm_034",
+    leftHip: "mixamorigLeftUpLeg_055",
+    rightHip: "mixamorigRightUpLeg_060",
+    leftKnee: "mixamorigLeftLeg_056",
+    rightKnee: "mixamorigRightLeg_061"
 };
 
 // ==========================================
@@ -90,8 +112,12 @@ const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1a1a1a);
 
+// Paramètres de départ (liés aux sliders HTML)
+let currentCamZ = 8;
+let currentTargetY = 1.5;
+
 const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
-camera.position.set(0, 1.5, 4);
+camera.position.set(0, currentTargetY, currentCamZ);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(container.clientWidth, container.clientHeight);
@@ -100,7 +126,7 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 container.appendChild(renderer.domElement);
 
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 1, 0);
+controls.target.set(0, currentTargetY, 0);
 controls.update();
 
 // Lumières pour les reflets
@@ -116,7 +142,23 @@ pointLight.position.set(-2, 1, 2);
 scene.add(pointLight);
 
 // ==========================================
-// 3. CHARGEMENT DU GLB ET DES OS
+// 3. GESTION DES CURSEURS HTML
+// ==========================================
+document.getElementById('camZ').addEventListener('input', (e) => {
+    currentCamZ = parseFloat(e.target.value);
+    camera.position.z = currentCamZ;
+});
+
+document.getElementById('targetY').addEventListener('input', (e) => {
+    currentTargetY = parseFloat(e.target.value);
+    controls.target.y = currentTargetY;
+    // On peut aussi ajuster la caméra sur l'axe Y pour un effet "ascenseur" propre
+    camera.position.y = currentTargetY; 
+    controls.update();
+});
+
+// ==========================================
+// 4. CHARGEMENT DU GLB ET DES OS
 // ==========================================
 let avatarBones = {};
 const loader = new THREE.GLTFLoader();
@@ -146,18 +188,18 @@ loader.load('free_female_mannequin_base_mesh.glb', (gltf) => {
     // Affichage des os trouvés dans le panneau de droite
     document.getElementById('bone-list').innerText = extractedBones.join('\n');
 
-    model.position.y = -1; // Ajustement hauteur
+    model.position.y = -1; // Ajustement hauteur générale
     scene.add(model);
     document.getElementById('loading').style.display = 'none';
 });
 
 // ==========================================
-// 4. LECTURE DU JSON ET SYNCHRONISATION
+// 5. LECTURE DU JSON ET SYNCHRONISATION
 // ==========================================
 let posesData = [];
 const player = Stream(document.getElementById('stream-player'));
 
-// Chargement des données JSON (Spec V2)
+// Chargement des données JSON
 fetch('AI-91439178d0ba03300cb99962fd9fbd02.json')
     .then(res => res.text())
     .then(text => {
@@ -194,7 +236,6 @@ function animate() {
     // 1. Trouver la frame correspondante au temps de la vidéo
     if (posesData.length > 0 && player) {
         
-        // Correction : currentTime est une propriété, pas une promise.
         const currentTime = player.currentTime;
         
         if (typeof currentTime === 'number') {
@@ -218,7 +259,7 @@ function animate() {
                 const rKnee = getMetricPoint(frame, 14);
                 const rAnkle = getMetricPoint(frame, 16);
 
-                // Application de l'animation sur le GLB
+                // Application de l'animation sur le GLB selon le mapping défini plus haut
                 pointBoneTo(avatarBones[BONE_MAPPING.leftShoulder], lShoulder, lElbow);
                 pointBoneTo(avatarBones[BONE_MAPPING.leftElbow], lElbow, lWrist);
                 
