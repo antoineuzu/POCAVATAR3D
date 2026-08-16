@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Prototype 3D Hdance - Live Motion (1.glb)</title>
+    <title>Prototype 3D Hdance - Fixed Alignment & Shading</title>
     <style>
         body, html { 
             margin: 0; padding: 0; height: 100%; 
@@ -54,8 +54,8 @@
         <h3 style="margin:0; color:#fff; border-bottom:1px solid #333; padding-bottom:10px;">Réglages & Test</h3>
         <button id="btn-force-play" class="btn-action">▶ Forcer la lecture 3D</button>
         <div class="slider-group">
-            <label for="camZ">Zoom (Profondeur) : <span id="valZ">2.5</span>m</label>
-            <input type="range" id="camZ" min="0.5" max="10" step="0.1" value="2.5">
+            <label for="camZ">Zoom (Profondeur) : <span id="valZ">3.0</span>m</label>
+            <input type="range" id="camZ" min="0.5" max="10" step="0.1" value="3.0">
         </div>
         <div class="slider-group">
             <label for="targetY">Hauteur (Cadrage Y) : <span id="valY">0.0</span></label>
@@ -89,12 +89,12 @@ const BONE_KEYWORDS = {
 };
 
 // ==========================================
-// 2. INITIALISATION THREE.JS
+// 2. SCÈNE 3D & ÉCLAIRAGE STUDIO (Anti-Rendu Blanc)
 // ==========================================
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 
-let currentCamZ = 2.5; 
+let currentCamZ = 3.0; 
 let currentTargetY = 0.0;
 
 const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
@@ -102,24 +102,32 @@ camera.position.set(0, currentTargetY, currentCamZ);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setSize(container.clientWidth, container.clientHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
 container.appendChild(renderer.domElement);
 
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.target.set(0, currentTargetY, 0);
 controls.update();
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
-dirLight.position.set(2, 5, 5);
-scene.add(dirLight);
+// Éclairage 3-points pour faire ressortir les formes anatomiques
+scene.add(new THREE.AmbientLight(0x404050, 1.2));
+
+const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
+keyLight.position.set(3, 5, 4);
+scene.add(keyLight);
+
+const fillLight = new THREE.DirectionalLight(0x00aaff, 0.8);
+fillLight.position.set(-4, 2, -2);
+scene.add(fillLight);
 
 const gridHelper = new THREE.GridHelper(10, 10, 0x00ffcc, 0x333333);
 gridHelper.position.y = -1;
 scene.add(gridHelper);
 
-// Sphères de debug pour repérer les points MediaPipe
+// Sphères de debug MediaPipe
 const debugSpheres = [];
-const sphereGeo = new THREE.SphereGeometry(0.03, 16, 16);
+const sphereGeo = new THREE.SphereGeometry(0.025, 16, 16);
 const materialLeft = new THREE.MeshBasicMaterial({ color: 0xff0000 });
 const materialRight = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
 const materialCenter = new THREE.MeshBasicMaterial({ color: 0xffffff });
@@ -135,7 +143,7 @@ for(let i = 0; i < 21; i++) {
 }
 
 // ==========================================
-// 3. CHARGEMENT DU FICHIER 1.GLB
+// 3. CHARGEMENT DE 1.GLB & MATÉRIAU SATINÉ
 // ==========================================
 let avatarModel = null;
 let avatarBones = {};
@@ -152,20 +160,26 @@ loadingDetails.innerText = "Chargement de 1.glb...";
 loader.load('./1.glb', (gltf) => {
     avatarModel = gltf.scene;
     
-    // Annulation des animations pré-enregistrées
     if (gltf.animations && gltf.animations.length) {
         gltf.animations = [];
     }
 
+    // Matériau Bleu Satiné avec du relief
+    const customMaterial = new THREE.MeshStandardMaterial({
+        color: 0x0088cc,
+        roughness: 0.3,
+        metalness: 0.2
+    });
+
     const allNodes = [];
     avatarModel.traverse((child) => {
-        if (child.isMesh && child.skeleton) {
-            skeletonRef = child.skeleton;
+        if (child.isMesh) {
+            child.material = customMaterial;
+            if (child.skeleton) skeletonRef = child.skeleton;
         }
         if (child.name) allNodes.push(child);
     });
 
-    // Association des os
     for (const [logicalName, keyword] of Object.entries(BONE_KEYWORDS)) {
         const matchedNode = allNodes.find(node => node.name.toLowerCase().includes(keyword.toLowerCase()));
         if (matchedNode) {
@@ -173,7 +187,7 @@ loader.load('./1.glb', (gltf) => {
         }
     }
 
-    // Auto-scaling pour adapter le modèle à la scène
+    // Normalisation de l'échelle à 1.8 mètre
     const bbox = new THREE.Box3().setFromObject(avatarModel);
     const size = bbox.getSize(new THREE.Vector3());
     if (size.y > 0) {
@@ -186,13 +200,10 @@ loader.load('./1.glb', (gltf) => {
     
     isModelLoaded = true;
     checkReadyAndInit();
-}, undefined, (err) => {
-    loadingDetails.innerText = "❌ Impossible de charger 1.glb. Vérifiez sa présence à la racine.";
-    console.error("Erreur 1.glb:", err);
 });
 
 // ==========================================
-// 4. LECTURE JSON & SYNCHRONISATION
+// 4. LECTURE JSON & SYNCHRO
 // ==========================================
 let posesData = [];
 let currentVideoTime = 0; 
@@ -225,31 +236,41 @@ fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
 function checkReadyAndInit() {
     if (isModelLoaded && isJsonLoaded) {
         document.getElementById('loading').style.display = 'none';
-        logPanel.innerHTML = `<span class="success-log">✅ Modèle 1.glb et JSON chargés (${posesData.length} frames).\n▶ Lancez la vidéo ou cliquez sur "Forcer la lecture 3D".</span>`;
+        logPanel.innerHTML = `<span class="success-log">✅ Modèle et JSON prêts.\n▶ Lancez la vidéo.</span>`;
         applyPose(posesData[0]);
     }
 }
 
 // ==========================================
-// 5. ANIMATION ET ORIENTATION
+// 5. CINÉMATIQUE VECTORIELLE ET ALIGNEMENT
 // ==========================================
 function getMetricPoint(frameData, k) {
     const startIdx = 133 + (k * 3);
     return new THREE.Vector3(frameData[startIdx], -frameData[startIdx + 1], -frameData[startIdx + 2]);
 }
 
-function alignBoneToTarget(bone, startPos, endPos) {
+// Orienter les os en local sans arracher le maillage de son centre
+function rotateBoneToTarget(bone, startPos, endPos, defaultAxis = new THREE.Vector3(0, 1, 0)) {
     if (!bone || !startPos || !endPos) return;
 
-    const dir = new THREE.Vector3().subVectors(endPos, startPos).normalize();
-    const targetWorldPos = new THREE.Vector3().addVectors(bone.getWorldPosition(new THREE.Vector3()), dir);
-    bone.lookAt(targetWorldPos);
+    const targetDir = new THREE.Vector3().subVectors(endPos, startPos).normalize();
+    const targetQuat = new THREE.Quaternion().setFromUnitVectors(defaultAxis, targetDir);
+
+    const parentQuat = new THREE.Quaternion();
+    if (bone.parent) {
+        bone.parent.updateWorldMatrix(true, false); 
+        bone.parent.getWorldQuaternion(parentQuat);
+    }
+    
+    const localQuat = parentQuat.invert().multiply(targetQuat);
+    bone.quaternion.copy(localQuat);
     bone.updateMatrixWorld(true);
 }
 
 function applyPose(frame) {
     if (!frame) return;
 
+    // 1. Placement exact des sphères de contrôle
     for(let i = 0; i < 21; i++) {
         const pt = getMetricPoint(frame, i);
         if(debugSpheres[i]) debugSpheres[i].position.copy(pt);
@@ -272,22 +293,29 @@ function applyPose(frame) {
     const midHip = new THREE.Vector3().addVectors(lHip, rHip).multiplyScalar(0.5);
     const midShoulder = new THREE.Vector3().addVectors(lShoulder, rShoulder).multiplyScalar(0.5);
 
+    // 2. Ancrer le modèle globalement au bassin MediaPipe
     if(avatarModel) {
         avatarModel.position.copy(midHip);
     }
 
-    alignBoneToTarget(avatarBones.spine, midHip, midShoulder);
-    alignBoneToTarget(avatarBones.neck, midShoulder, nose);
+    // 3. Axes standards de repos
+    const axisY = new THREE.Vector3(0, 1, 0);
+    const axisLeftArm = new THREE.Vector3(1, 0, 0);
+    const axisRightArm = new THREE.Vector3(-1, 0, 0);
 
-    alignBoneToTarget(avatarBones.leftShoulder, lShoulder, lElbow);
-    alignBoneToTarget(avatarBones.rightShoulder, rShoulder, rElbow);
-    alignBoneToTarget(avatarBones.leftElbow, lElbow, lWrist);
-    alignBoneToTarget(avatarBones.rightElbow, rElbow, rWrist);
+    // 4. Orientations locales
+    rotateBoneToTarget(avatarBones.spine, midHip, midShoulder, axisY);
+    rotateBoneToTarget(avatarBones.neck, midShoulder, nose, axisY);
 
-    alignBoneToTarget(avatarBones.leftHip, lHip, lKnee);
-    alignBoneToTarget(avatarBones.rightHip, rHip, rKnee);
-    alignBoneToTarget(avatarBones.leftKnee, lKnee, lAnkle);
-    alignBoneToTarget(avatarBones.rightKnee, rKnee, rAnkle);
+    rotateBoneToTarget(avatarBones.leftShoulder, lShoulder, lElbow, axisLeftArm);
+    rotateBoneToTarget(avatarBones.rightShoulder, rShoulder, rElbow, axisRightArm);
+    rotateBoneToTarget(avatarBones.leftElbow, lElbow, lWrist, axisLeftArm);
+    rotateBoneToTarget(avatarBones.rightElbow, rElbow, rWrist, axisRightArm);
+
+    rotateBoneToTarget(avatarBones.leftHip, lHip, lKnee, axisY);
+    rotateBoneToTarget(avatarBones.rightHip, rHip, rKnee, axisY);
+    rotateBoneToTarget(avatarBones.leftKnee, lKnee, lAnkle, axisY);
+    rotateBoneToTarget(avatarBones.rightKnee, rKnee, rAnkle, axisY);
 
     if (skeletonRef) {
         skeletonRef.update();
@@ -311,7 +339,7 @@ function animate() {
             if(Date.now() - lastLogTime > 250) {
                 logPanel.innerText = `[TÉLÉMÉTRIE EN DIRECT]\n`
                     + `▶ Temps : ${currentVideoTime.toFixed(3)}s | Frame : ${frame[0].toFixed(3)}s\n`
-                    + `Modèle 1.glb synchronisé.`;
+                    + `Pose alignée sur les sphères MediaPipe.`;
                 lastLogTime = Date.now();
             }
         }
