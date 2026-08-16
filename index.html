@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Prototype 3D Hdance - Split Screen</title>
+    <title>Prototype 3D Hdance - Quaternions</title>
     <style>
         body, html { 
             margin: 0; padding: 0; height: 100%; 
@@ -11,7 +11,6 @@
             overflow: hidden; display: flex; flex-direction: column;
         }
         
-        /* HAUT : Split Screen Vidéo / 3D */
         #top-half { 
             display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0;
         }
@@ -29,7 +28,6 @@
             color: #00ffcc; font-weight: bold; font-size: 1.2rem; pointer-events: none; 
         }
 
-        /* BAS : Contrôles & Logs */
         #bottom-half { 
             height: 250px; display: flex; background: #0a0a0a;
         }
@@ -46,17 +44,13 @@
         }
     </style>
     
-    <!-- Librairies Three.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-    
-    <!-- SDK Cloudflare Stream -->
     <script src="https://embed.cloudflarestream.com/embed/sdk.latest.js"></script>
 </head>
 <body>
 
-<!-- MOITIÉ HAUTE : VIDÉO (GAUCHE) / 3D (DROITE) -->
 <div id="top-half">
     <div id="video-container">
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
@@ -66,17 +60,17 @@
     </div>
 </div>
 
-<!-- MOITIÉ BASSE : CONTRÔLES / ASCENSEUR DE LOGS -->
 <div id="bottom-half">
     <div id="controls-panel">
         <h3 style="margin:0; color:#fff; border-bottom:1px solid #333; padding-bottom:10px;">Réglages 3D</h3>
         <div class="slider-group">
-            <label for="camZ">Zoom (Profondeur) : <span id="valZ">6</span>m</label>
-            <input type="range" id="camZ" min="2" max="15" step="0.5" value="6">
+            <label for="camZ">Zoom (Profondeur) : <span id="valZ">25</span></label>
+            <!-- Limite augmentée à 100 pour gérer les avatars géants -->
+            <input type="range" id="camZ" min="2" max="100" step="1" value="25">
         </div>
         <div class="slider-group">
             <label for="targetY">Hauteur (Cadrage Y) : <span id="valY">1.0</span></label>
-            <input type="range" id="targetY" min="-2" max="4" step="0.1" value="1.0">
+            <input type="range" id="targetY" min="-5" max="20" step="0.5" value="1.0">
         </div>
     </div>
     <div id="log-panel">En attente de connexion...</div>
@@ -103,10 +97,11 @@ const BONE_MAPPING = {
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 
-let currentCamZ = 6;
+// Recul massif par défaut pour englober tout le corps
+let currentCamZ = 25;
 let currentTargetY = 1.0;
 
-const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
+const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
 camera.position.set(0, currentTargetY, currentCamZ);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -117,7 +112,6 @@ const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.target.set(0, currentTargetY, 0);
 controls.update();
 
-// Lumières 
 scene.add(new THREE.AmbientLight(0xffffff, 0.6));
 const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
 dirLight.position.set(2, 5, 5);
@@ -145,13 +139,13 @@ loader.load('free_female_mannequin_base_mesh.glb', (gltf) => {
         }
     });
 
-    model.position.y = -1; // Ajustement global du mannequin
+    model.position.y = -1;
     scene.add(model);
     document.getElementById('loading').style.display = 'none';
 });
 
 // ==========================================
-// 4. LECTURE JSON & SYNCHRONISATION
+// 4. LECTURE JSON & MOTEUR QUATERNIONS
 // ==========================================
 let posesData = [];
 const player = Stream(document.getElementById('stream-player'));
@@ -170,18 +164,31 @@ function getMetricPoint(frameData, k) {
     return new THREE.Vector3(frameData[startIdx], -frameData[startIdx + 1], -frameData[startIdx + 2]);
 }
 
-// Fonction de rotation CORRIGÉE (World Space)
-const targetWorldPos = new THREE.Vector3();
+// 🔥 MOTEUR D'ANIMATION AVANCÉ (Quaternions FK)
 function pointBoneTo(bone, startPos, endPos) {
     if(!bone || !startPos || !endPos) return;
-    const direction = new THREE.Vector3().subVectors(endPos, startPos).normalize();
+
+    // 1. Calcul du vecteur directionnel cible (MediaPipe)
+    const targetDir = new THREE.Vector3().subVectors(endPos, startPos).normalize();
     
-    // On prend la position absolue de l'os dans la scène 3D
-    bone.getWorldPosition(targetWorldPos);
-    // On lui ajoute le vecteur de direction MediaPipe
-    targetWorldPos.add(direction);
-    // On oriente l'os vers cette nouvelle coordonnée absolue
-    bone.lookAt(targetWorldPos);
+    // 2. L'axe naturel d'un os (Bone) dans Mixamo est l'axe Y (0, 1, 0)
+    // C'est la direction vers laquelle l'os pointe quand sa rotation est à (0,0,0)
+    const boneDefaultAxis = new THREE.Vector3(0, 1, 0);
+
+    // 3. Calcul de la rotation absolue pour aligner l'axe de l'os sur la cible
+    const targetQuaternion = new THREE.Quaternion().setFromUnitVectors(boneDefaultAxis, targetDir);
+
+    // 4. Conversion en rotation locale (en annulant la rotation du parent)
+    const parentWorldQuat = new THREE.Quaternion();
+    if (bone.parent) {
+        bone.parent.getWorldQuaternion(parentWorldQuat);
+    }
+    
+    // Formule : Quaternion Local = Inverse(Parent Global) * Cible Globale
+    const localQuat = parentWorldQuat.invert().multiply(targetQuaternion);
+    
+    // 5. Application propre sans torsion de l'axe Z
+    bone.quaternion.copy(localQuat);
 }
 
 const logPanel = document.getElementById('log-panel');
@@ -212,7 +219,7 @@ function animate() {
                 const rKnee = getMetricPoint(frame, 14);
                 const rAnkle = getMetricPoint(frame, 16);
 
-                // Animation des membres
+                // Animation robuste basée sur les Quaternions
                 pointBoneTo(avatarBones[BONE_MAPPING.leftShoulder], lShoulder, lElbow);
                 pointBoneTo(avatarBones[BONE_MAPPING.leftElbow], lElbow, lWrist);
                 
@@ -225,12 +232,11 @@ function animate() {
                 pointBoneTo(avatarBones[BONE_MAPPING.rightHip], rHip, rKnee);
                 pointBoneTo(avatarBones[BONE_MAPPING.rightKnee], rKnee, rAnkle);
 
-                // Mise à jour de l'ascenseur texte
                 logPanel.innerText = `[EN DIRECT] Temps Vidéo : ${currentTime.toFixed(3)}s | Frame JSON : ${frame[0].toFixed(2)}s\n\n`
                     + `--- DONNÉES BIOMÉCANIQUES (Mètres) ---\n`
                     + `Épaule G  : X ${lShoulder.x.toFixed(3)} | Y ${lShoulder.y.toFixed(3)} | Z ${lShoulder.z.toFixed(3)}\n`
                     + `Épaule D  : X ${rShoulder.x.toFixed(3)} | Y ${rShoulder.y.toFixed(3)} | Z ${rShoulder.z.toFixed(3)}\n\n`
-                    + `--- LISTE DES OS DU GLB (Pour debug mapping) ---\n`
+                    + `--- LISTE DES OS DU GLB ---\n`
                     + extractedBonesList.join(', ');
             }
         }
@@ -242,7 +248,7 @@ function animate() {
 animate();
 
 // ==========================================
-// 5. GESTION DES EVENEMENTS (Sliders & Resize)
+// 5. GESTION DES SLIDERS
 // ==========================================
 document.getElementById('camZ').addEventListener('input', (e) => {
     currentCamZ = parseFloat(e.target.value);
