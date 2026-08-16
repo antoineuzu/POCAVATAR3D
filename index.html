@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Prototype 3D Hdance - Full Telemetry & Motion Fix</title>
+    <title>Prototype 3D Hdance - Fixed Skinning & Full Telemetry</title>
     <style>
         body, html { 
             margin: 0; padding: 0; height: 100%; 
@@ -153,7 +153,7 @@ for(let i = 0; i < 21; i++) {
 }
 
 // ==========================================
-// 3. STATUTS MODULES & CHARGEMENT GLB
+// 3. STATUTS MODULES & CHARGEMENT GLB (LIAISON FORCEE)
 // ==========================================
 let avatarModel = null;
 let avatarBones = {};
@@ -178,7 +178,6 @@ loader.load('./1.glb', (gltf) => {
         gltf.animations = [];
     }
 
-    // Matériau Bleu Satiné
     const customMaterial = new THREE.MeshStandardMaterial({
         color: 0x0088cc,
         roughness: 0.3,
@@ -189,13 +188,17 @@ loader.load('./1.glb', (gltf) => {
     avatarModel.traverse((child) => {
         if (child.isMesh) {
             child.material = customMaterial;
-            if (child.isSkinnedMesh) skinnedMeshes.push(child);
+            if (child.isSkinnedMesh) {
+                skinnedMeshes.push(child);
+                child.bindMode = "attached";
+                child.normalizeSkinWeights();
+            }
         }
         if (child.name) allNodes.push(child);
     });
 
     moduleLogs += `✔ GLTFLoader : 1.glb chargé (${allNodes.length} nœuds détectés)\n`;
-    moduleLogs += `✔ SkinnedMesh : ${skinnedMeshes.length} maillage(s) articulé(s) détecté(s)\n`;
+    moduleLogs += `✔ SkinnedMesh : ${skinnedMeshes.length} maillage(s) rattaché(s)\n`;
 
     let mappedCount = 0;
     for (const [logicalName, keyword] of Object.entries(BONE_KEYWORDS)) {
@@ -268,14 +271,13 @@ function checkReadyAndInit() {
 }
 
 // ==========================================
-// 5. MOTEUR CINÉMATIQUE & CALCUL ROTATIONS
+// 5. MOTEUR CINÉMATIQUE & UPDATE MATRICES
 // ==========================================
 function getMetricPoint(frameData, k) {
     const startIdx = 133 + (k * 3);
     return new THREE.Vector3(frameData[startIdx], -frameData[startIdx + 1], -frameData[startIdx + 2]);
 }
 
-// Orientation d'os sécurisée avec calcul d'angle Euler pour la télémétrie
 const boneRotationsLog = {};
 
 function orientBone(boneKey, boneObj, startPos, endPos, defaultAxis) {
@@ -285,16 +287,16 @@ function orientBone(boneKey, boneObj, startPos, endPos, defaultAxis) {
     const targetQuat = new THREE.Quaternion().setFromUnitVectors(defaultAxis, targetDir);
 
     if (boneObj.parent) {
-        boneObj.parent.updateWorldMatrix(true, false);
+        boneObj.parent.updateMatrixWorld(true);
         const parentQuat = new THREE.Quaternion();
         boneObj.parent.getWorldQuaternion(parentQuat);
         targetQuat.premultiply(parentQuat.invert());
     }
 
     boneObj.quaternion.copy(targetQuat);
+    boneObj.updateMatrix();
     boneObj.updateMatrixWorld(true);
 
-    // Extraction des angles Euler (X,Y,Z en degrés) pour l'affichage exhaustif
     const euler = new THREE.Euler().setFromQuaternion(targetQuat, 'XYZ');
     boneRotationsLog[boneKey] = {
         x: (euler.x * 180 / Math.PI).toFixed(1),
@@ -306,13 +308,11 @@ function orientBone(boneKey, boneObj, startPos, endPos, defaultAxis) {
 function applyPose(frame) {
     if (!frame) return;
 
-    // 1. Placement des 21 sphères MediaPipe
     for(let i = 0; i < 21; i++) {
         const pt = getMetricPoint(frame, i);
         if(debugSpheres[i]) debugSpheres[i].position.copy(pt);
     }
 
-    // 2. Extractions des 21 points
     const nose = getMetricPoint(frame, 0);
     const lShoulder = getMetricPoint(frame, 3);
     const rShoulder = getMetricPoint(frame, 4);
@@ -330,12 +330,11 @@ function applyPose(frame) {
     const midHip = new THREE.Vector3().addVectors(lHip, rHip).multiplyScalar(0.5);
     const midShoulder = new THREE.Vector3().addVectors(lShoulder, rShoulder).multiplyScalar(0.5);
 
-    // 3. Translation de l'avatar au centre du bassin
     if(avatarModel) {
         avatarModel.position.copy(midHip);
+        avatarModel.updateMatrixWorld(true);
     }
 
-    // 4. Orientations des os
     const axisY = new THREE.Vector3(0, 1, 0);
     const axisLeftArm = new THREE.Vector3(1, 0, 0);
     const axisRightArm = new THREE.Vector3(-1, 0, 0);
@@ -353,14 +352,15 @@ function applyPose(frame) {
     orientBone('LeftKnee', avatarBones.leftKnee, lKnee, lAnkle, axisY);
     orientBone('RightKnee', avatarBones.rightKnee, rKnee, rAnkle, axisY);
 
-    // 5. Forcer la mise à jour de la peau SkinnedMesh
     skinnedMeshes.forEach(mesh => {
-        if (mesh.skeleton) mesh.skeleton.update();
+        if (mesh.skeleton) {
+            mesh.skeleton.update();
+        }
     });
 }
 
 // ==========================================
-// 6. ANIMATION & TÉLÉMÉTRIE EXHAUSTIVE EN DIRECT
+// 6. ANIMATION & TÉLÉMÉTRIE EXHAUSTIVE
 // ==========================================
 let lastLogTime = 0;
 
@@ -377,7 +377,6 @@ function animate() {
         if (frame) {
             applyPose(frame);
 
-            // Rafraîchissement des logs 4x par seconde
             if(Date.now() - lastLogTime > 250) {
                 let txt = moduleLogs + "\n";
                 txt += "=== TÉLÉMÉTRIE DE SQUELETTE EN DIRECT ===\n";
