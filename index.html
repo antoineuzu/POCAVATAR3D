@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prototype 3D Hdance</title>
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; background-color: #111; font-family: sans-serif; }
+        #container { display: flex; flex-direction: column; height: 100vh; }
+        
+        /* Partie Haute : Vidéo Cloudflare */
+        #video-container { flex: 1; background: #000; display: flex; justify-content: center; align-items: center; border-bottom: 2px solid #333; }
+        iframe { width: 100%; height: 100%; max-width: 800px; border: none; }
+        
+        /* Partie Basse : Canvas 3D */
+        #canvas-container { flex: 1; position: relative; overflow: hidden; }
+        
+        /* UI de chargement */
+        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #00ffcc; font-weight: bold; font-size: 1.2rem; pointer-events: none; }
+    </style>
+    
+    <!-- Librairies Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    
+    <!-- SDK Cloudflare Stream -->
+    <script src="https://embed.cloudflarestream.com/embed/sdk.latest.js"></script>
+</head>
+<body>
+
+<div id="container">
+    <!-- Vidéo du prof (Cloudflare) -->
+    <div id="video-container">
+        <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
+    </div>
+
+    <!-- Rendu 3D GLB -->
+    <div id="canvas-container">
+        <div id="loading">Chargement IA & 3D...</div>
+    </div>
+</div>
+
+<script>
+// ==========================================
+// 1. CONFIGURATION & MAPPING
+// ==========================================
+const BONE_MAPPING = {
+    // ⚠️ A MODIFIER SELON CE QUI S'AFFICHE DANS TA CONSOLE F12 ⚠️
+    leftShoulder: "mixamorigLeftArm", 
+    rightShoulder: "mixamorigRightArm",
+    leftElbow: "mixamorigLeftForeArm",
+    rightElbow: "mixamorigRightForeArm",
+    leftHip: "mixamorigLeftUpLeg",
+    rightHip: "mixamorigRightUpLeg",
+    leftKnee: "mixamorigLeftLeg",
+    rightKnee: "mixamorigRightLeg"
+};
+
+// ==========================================
+// 2. INITIALISATION THREE.JS
+// ==========================================
+const container = document.getElementById('canvas-container');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1a1a);
+
+const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
+camera.position.set(0, 1.5, 4);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(container.clientWidth, container.clientHeight);
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+container.appendChild(renderer.domElement);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1, 0);
+controls.update();
+
+// Lumières et reflets
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+scene.add(ambientLight);
+
+const dirLight = new THREE.DirectionalLight(0xffffff, 2);
+dirLight.position.set(2, 5, 3);
+scene.add(dirLight);
+
+const pointLight = new THREE.PointLight(0x00ffcc, 5, 10);
+pointLight.position.set(-2, 1, 2);
+scene.add(pointLight);
+
+// ==========================================
+// 3. CHARGEMENT DU GLB AVEC MATÉRIAU RÉFLÉCHISSANT
+// ==========================================
+let avatarBones = {};
+const loader = new THREE.GLTFLoader();
+
+loader.load('free_female_mannequin_base_mesh.glb', (gltf) => {
+    const model = gltf.scene;
+    
+    // Matériau esthétique (Reflets / Couleur)
+    const shinyMaterial = new THREE.MeshStandardMaterial({
+        color: 0x00aaff,
+        metalness: 0.8,
+        roughness: 0.1,
+    });
+
+    console.log("--- LISTE DES OS DU GLB (Pour ajuster BONE_MAPPING) ---");
+    model.traverse((child) => {
+        if (child.isMesh) {
+            child.material = shinyMaterial;
+        }
+        if (child.isBone) {
+            console.log(child.name); // 👈 REGARDE LA CONSOLE F12
+            avatarBones[child.name] = child;
+        }
+    });
+
+    model.position.y = -1; // Ajustement hauteur
+    scene.add(model);
+    document.getElementById('loading').style.display = 'none';
+});
+
+// ==========================================
+// 4. LECTURE DU JSON ET SYNCHRONISATION
+// ==========================================
+let posesData = [];
+const player = Stream(document.getElementById('stream-player'));
+
+// Chargement des données JSON (Spec V2)
+fetch('AI-91439178d0ba03300cb99962fd9fbd02.json')
+    .then(res => res.text())
+    .then(text => {
+        const lines = text.trim().split('\n');
+        // Ignorer la ligne 0 (En-tête JSON) et parser le reste
+        for(let i = 1; i < lines.length; i++) {
+            posesData.push(JSON.parse(lines[i]));
+        }
+    });
+
+// Extraction d'un point métrique depuis la ligne (196 valeurs)
+// k correspond à l'index dans la liste ACTIFS de ton script Python
+function getMetricPoint(frameData, k) {
+    const startIdx = 133 + (k * 3);
+    // Inversion Y et Z pour passer de MediaPipe à Three.js
+    return new THREE.Vector3(
+        frameData[startIdx],
+        -frameData[startIdx + 1],
+        -frameData[startIdx + 2]
+    );
+}
+
+// Fonction de calcul d'orientation simplifiée (Cinématique Directe)
+function pointBoneTo(bone, startPos, endPos) {
+    if(!bone || !startPos || !endPos) return;
+    const direction = new THREE.Vector3().subVectors(endPos, startPos).normalize();
+    // Le lookAt est basique. Pour une rig parfaite, un calcul de Quaternion IK est requis.
+    const targetPoint = new THREE.Vector3().addVectors(bone.position, direction);
+    bone.lookAt(targetPoint);
+}
+
+// Boucle d'animation
+function animate() {
+    requestAnimationFrame(animate);
+
+    // 1. Trouver la frame correspondante au temps de la vidéo
+    if (posesData.length > 0 && player) {
+        player.currentTime.then(currentTime => {
+            // Chercher la ligne dont le temps [0] est le plus proche
+            const frame = posesData.find(p => Math.abs(p[0] - currentTime) < 0.04) || posesData[Math.floor(currentTime * 25)];
+            
+            if (frame) {
+                // k=3: Épaule G | k=5: Coude G | k=7: Poignet G
+                const lShoulder = getMetricPoint(frame, 3);
+                const lElbow = getMetricPoint(frame, 5);
+                const lWrist = getMetricPoint(frame, 7);
+
+                // k=4: Épaule D | k=6: Coude D | k=8: Poignet D
+                const rShoulder = getMetricPoint(frame, 4);
+                const rElbow = getMetricPoint(frame, 6);
+                const rWrist = getMetricPoint(frame, 8);
+
+                // k=11: Hanche G | k=13: Genou G | k=15: Cheville G
+                const lHip = getMetricPoint(frame, 11);
+                const lKnee = getMetricPoint(frame, 13);
+                const lAnkle = getMetricPoint(frame, 15);
+
+                // k=12: Hanche D | k=14: Genou D | k=16: Cheville D
+                const rHip = getMetricPoint(frame, 12);
+                const rKnee = getMetricPoint(frame, 14);
+                const rAnkle = getMetricPoint(frame, 16);
+
+                // Animation des membres (Prototype simplifié)
+                pointBoneTo(avatarBones[BONE_MAPPING.leftShoulder], lShoulder, lElbow);
+                pointBoneTo(avatarBones[BONE_MAPPING.leftElbow], lElbow, lWrist);
+                
+                pointBoneTo(avatarBones[BONE_MAPPING.rightShoulder], rShoulder, rElbow);
+                pointBoneTo(avatarBones[BONE_MAPPING.rightElbow], rElbow, rWrist);
+
+                pointBoneTo(avatarBones[BONE_MAPPING.leftHip], lHip, lKnee);
+                pointBoneTo(avatarBones[BONE_MAPPING.leftKnee], lKnee, lAnkle);
+
+                pointBoneTo(avatarBones[BONE_MAPPING.rightHip], rHip, rKnee);
+                pointBoneTo(avatarBones[BONE_MAPPING.rightKnee], rKnee, rAnkle);
+            }
+        });
+    }
+
+    renderer.render(scene, camera);
+}
+
+// Lancement
+animate();
+
+// Responsivité
+window.addEventListener('resize', () => {
+    camera.aspect = container.clientWidth / container.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(container.clientWidth, container.clientHeight);
+});
+</script>
+
+</body>
+</html>
