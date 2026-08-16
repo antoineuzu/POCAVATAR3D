@@ -97,8 +97,7 @@ const BONE_MAPPING = {
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 
-// Recul massif par défaut pour englober tout le corps
-let currentCamZ = 25;
+let currentCamZ = 25; // Recul initial augmenté
 let currentTargetY = 1.0;
 
 const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
@@ -112,6 +111,7 @@ const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.target.set(0, currentTargetY, 0);
 controls.update();
 
+// Lumières 
 scene.add(new THREE.AmbientLight(0xffffff, 0.6));
 const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
 dirLight.position.set(2, 5, 5);
@@ -139,16 +139,22 @@ loader.load('free_female_mannequin_base_mesh.glb', (gltf) => {
         }
     });
 
-    model.position.y = -1;
+    model.position.y = -1; // Ajustement global du mannequin
     scene.add(model);
     document.getElementById('loading').style.display = 'none';
 });
 
 // ==========================================
-// 4. LECTURE JSON & MOTEUR QUATERNIONS
+// 4. LECTURE JSON & LECTEUR CLOUDFLARE
 // ==========================================
 let posesData = [];
+let currentVideoTime = 0; // Sécurisation du timer
 const player = Stream(document.getElementById('stream-player'));
+
+// Écoute du temps Cloudflare en temps réel
+player.addEventListener('timeupdate', (event) => {
+    currentVideoTime = event.currentTime;
+});
 
 fetch('AI-91439178d0ba03300cb99962fd9fbd02.json')
     .then(res => res.text())
@@ -164,30 +170,33 @@ function getMetricPoint(frameData, k) {
     return new THREE.Vector3(frameData[startIdx], -frameData[startIdx + 1], -frameData[startIdx + 2]);
 }
 
-// 🔥 MOTEUR D'ANIMATION AVANCÉ (Quaternions FK)
+// ==========================================
+// 🔥 5. VRAI MOTEUR QUATERNIONS (Cinématique)
+// ==========================================
 function pointBoneTo(bone, startPos, endPos) {
     if(!bone || !startPos || !endPos) return;
 
-    // 1. Calcul du vecteur directionnel cible (MediaPipe)
+    // 1. Vecteur directionnel (Le mouvement MediaPipe)
     const targetDir = new THREE.Vector3().subVectors(endPos, startPos).normalize();
     
-    // 2. L'axe naturel d'un os (Bone) dans Mixamo est l'axe Y (0, 1, 0)
-    // C'est la direction vers laquelle l'os pointe quand sa rotation est à (0,0,0)
-    const boneDefaultAxis = new THREE.Vector3(0, 1, 0);
+    // 2. Axe naturel de l'os (Généralement Y pour un rigging classique Mixamo)
+    const boneAxis = new THREE.Vector3(0, 1, 0);
 
-    // 3. Calcul de la rotation absolue pour aligner l'axe de l'os sur la cible
-    const targetQuaternion = new THREE.Quaternion().setFromUnitVectors(boneDefaultAxis, targetDir);
+    // 3. Calcul de la rotation absolue cible
+    const targetQuat = new THREE.Quaternion().setFromUnitVectors(boneAxis, targetDir);
 
-    // 4. Conversion en rotation locale (en annulant la rotation du parent)
-    const parentWorldQuat = new THREE.Quaternion();
+    // 4. Calcul de la rotation locale (On annule la rotation du parent)
+    const parentQuat = new THREE.Quaternion();
     if (bone.parent) {
-        bone.parent.getWorldQuaternion(parentWorldQuat);
+        // Mise à jour vitale pour s'assurer que le parent (ex: épaule) a fini de tourner avant de bouger l'enfant (ex: coude)
+        bone.parent.updateWorldMatrix(true, false); 
+        bone.parent.getWorldQuaternion(parentQuat);
     }
     
-    // Formule : Quaternion Local = Inverse(Parent Global) * Cible Globale
-    const localQuat = parentWorldQuat.invert().multiply(targetQuaternion);
+    // Formule mathématique : Quaternion Local = Inverse(Parent Global) * Cible
+    const localQuat = parentQuat.invert().multiply(targetQuat);
     
-    // 5. Application propre sans torsion de l'axe Z
+    // 5. Application propre !
     bone.quaternion.copy(localQuat);
 }
 
@@ -196,49 +205,49 @@ const logPanel = document.getElementById('log-panel');
 function animate() {
     requestAnimationFrame(animate);
 
-    if (posesData.length > 0 && player) {
-        const currentTime = player.currentTime;
+    if (posesData.length > 0 && currentVideoTime > 0) {
         
-        if (typeof currentTime === 'number') {
-            const frame = posesData.find(p => Math.abs(p[0] - currentTime) < 0.04) || posesData[Math.floor(currentTime * 25)];
+        // On récupère la ligne JSON correspondant à la milliseconde actuelle
+        const frame = posesData.find(p => Math.abs(p[0] - currentVideoTime) < 0.04) || posesData[Math.floor(currentVideoTime * 25)];
+        
+        if (frame) {
+            const lShoulder = getMetricPoint(frame, 3);
+            const lElbow = getMetricPoint(frame, 5);
+            const lWrist = getMetricPoint(frame, 7);
+
+            const rShoulder = getMetricPoint(frame, 4);
+            const rElbow = getMetricPoint(frame, 6);
+            const rWrist = getMetricPoint(frame, 8);
+
+            const lHip = getMetricPoint(frame, 11);
+            const lKnee = getMetricPoint(frame, 13);
+            const lAnkle = getMetricPoint(frame, 15);
+
+            const rHip = getMetricPoint(frame, 12);
+            const rKnee = getMetricPoint(frame, 14);
+            const rAnkle = getMetricPoint(frame, 16);
+
+            // ANIMATION DES MEMBRES SUPÉRIEURS
+            pointBoneTo(avatarBones[BONE_MAPPING.leftShoulder], lShoulder, lElbow);
+            pointBoneTo(avatarBones[BONE_MAPPING.rightShoulder], rShoulder, rElbow);
             
-            if (frame) {
-                const lShoulder = getMetricPoint(frame, 3);
-                const lElbow = getMetricPoint(frame, 5);
-                const lWrist = getMetricPoint(frame, 7);
+            // ANIMATION DES ARTICULATIONS ENFANTS
+            pointBoneTo(avatarBones[BONE_MAPPING.leftElbow], lElbow, lWrist);
+            pointBoneTo(avatarBones[BONE_MAPPING.rightElbow], rElbow, rWrist);
 
-                const rShoulder = getMetricPoint(frame, 4);
-                const rElbow = getMetricPoint(frame, 6);
-                const rWrist = getMetricPoint(frame, 8);
+            // MEMBRES INFÉRIEURS
+            pointBoneTo(avatarBones[BONE_MAPPING.leftHip], lHip, lKnee);
+            pointBoneTo(avatarBones[BONE_MAPPING.rightHip], rHip, rKnee);
+            pointBoneTo(avatarBones[BONE_MAPPING.leftKnee], lKnee, lAnkle);
+            pointBoneTo(avatarBones[BONE_MAPPING.rightKnee], rKnee, rAnkle);
 
-                const lHip = getMetricPoint(frame, 11);
-                const lKnee = getMetricPoint(frame, 13);
-                const lAnkle = getMetricPoint(frame, 15);
-
-                const rHip = getMetricPoint(frame, 12);
-                const rKnee = getMetricPoint(frame, 14);
-                const rAnkle = getMetricPoint(frame, 16);
-
-                // Animation robuste basée sur les Quaternions
-                pointBoneTo(avatarBones[BONE_MAPPING.leftShoulder], lShoulder, lElbow);
-                pointBoneTo(avatarBones[BONE_MAPPING.leftElbow], lElbow, lWrist);
-                
-                pointBoneTo(avatarBones[BONE_MAPPING.rightShoulder], rShoulder, rElbow);
-                pointBoneTo(avatarBones[BONE_MAPPING.rightElbow], rElbow, rWrist);
-
-                pointBoneTo(avatarBones[BONE_MAPPING.leftHip], lHip, lKnee);
-                pointBoneTo(avatarBones[BONE_MAPPING.leftKnee], lKnee, lAnkle);
-
-                pointBoneTo(avatarBones[BONE_MAPPING.rightHip], rHip, rKnee);
-                pointBoneTo(avatarBones[BONE_MAPPING.rightKnee], rKnee, rAnkle);
-
-                logPanel.innerText = `[EN DIRECT] Temps Vidéo : ${currentTime.toFixed(3)}s | Frame JSON : ${frame[0].toFixed(2)}s\n\n`
-                    + `--- DONNÉES BIOMÉCANIQUES (Mètres) ---\n`
-                    + `Épaule G  : X ${lShoulder.x.toFixed(3)} | Y ${lShoulder.y.toFixed(3)} | Z ${lShoulder.z.toFixed(3)}\n`
-                    + `Épaule D  : X ${rShoulder.x.toFixed(3)} | Y ${rShoulder.y.toFixed(3)} | Z ${rShoulder.z.toFixed(3)}\n\n`
-                    + `--- LISTE DES OS DU GLB ---\n`
-                    + extractedBonesList.join(', ');
-            }
+            // TÉLÉMÉTRIE
+            logPanel.innerText = `[EN DIRECT] Temps Vidéo : ${currentVideoTime.toFixed(3)}s | Frame JSON : ${frame[0].toFixed(2)}s\n\n`
+                + `--- DONNÉES BIOMÉCANIQUES (Mètres) ---\n`
+                + `Épaule G  : X ${lShoulder.x.toFixed(3)} | Y ${lShoulder.y.toFixed(3)} | Z ${lShoulder.z.toFixed(3)}\n`
+                + `Épaule D  : X ${rShoulder.x.toFixed(3)} | Y ${rShoulder.y.toFixed(3)} | Z ${rShoulder.z.toFixed(3)}\n\n`
+                + `--- LISTE DES OS DU GLB ---\n`
+                + extractedBonesList.join(', ');
         }
     }
 
@@ -248,7 +257,7 @@ function animate() {
 animate();
 
 // ==========================================
-// 5. GESTION DES SLIDERS
+// 6. GESTION DES EVENEMENTS (Sliders & Resize)
 // ==========================================
 document.getElementById('camZ').addEventListener('input', (e) => {
     currentCamZ = parseFloat(e.target.value);
