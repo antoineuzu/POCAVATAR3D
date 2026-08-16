@@ -11,39 +11,19 @@
             overflow: hidden; display: flex; flex-direction: column;
         }
         
-        /* HAUT : Split Screen Vidéo / 3D */
-        #top-half { 
-            display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0;
-        }
-        
-        #video-container { 
-            flex: 1; background: #000; border-right: 2px solid #333; 
-        }
+        #top-half { display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0; }
+        #video-container { flex: 1; background: #000; border-right: 2px solid #333; }
         iframe { width: 100%; height: 100%; border: none; }
         
-        #canvas-container { 
-            flex: 1; position: relative; background: #1a1a1a;
-        }
-        #loading { 
-            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
-            color: #00ffcc; font-weight: bold; font-size: 1.2rem; pointer-events: none; 
-        }
+        #canvas-container { flex: 1; position: relative; background: #1a1a1a; }
+        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #00ffcc; font-weight: bold; font-size: 1.2rem; pointer-events: none; }
 
-        /* BAS : Contrôles & Logs */
-        #bottom-half { 
-            height: 250px; display: flex; background: #0a0a0a;
-        }
-
-        #controls-panel {
-            width: 300px; padding: 20px; border-right: 2px solid #333;
-            display: flex; flex-direction: column; gap: 15px;
-        }
+        #bottom-half { height: 250px; display: flex; background: #0a0a0a; }
+        #controls-panel { width: 300px; padding: 20px; border-right: 2px solid #333; display: flex; flex-direction: column; gap: 15px; }
         .slider-group { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: #00ffcc; }
         input[type=range] { cursor: pointer; width: 100%; }
 
-        #log-panel {
-            flex: 1; padding: 15px; overflow-y: auto; font-family: monospace; font-size: 13px; color: #0f0;
-        }
+        #log-panel { flex: 1; padding: 15px; overflow-y: auto; font-family: monospace; font-size: 13px; color: #0f0; white-space: pre-wrap;}
     </style>
     
     <!-- Librairies Three.js -->
@@ -56,7 +36,6 @@
 </head>
 <body>
 
-<!-- MOITIÉ HAUTE : VIDÉO (GAUCHE) / 3D (DROITE) -->
 <div id="top-half">
     <div id="video-container">
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
@@ -66,26 +45,24 @@
     </div>
 </div>
 
-<!-- MOITIÉ BASSE : CONTRÔLES / ASCENSEUR DE LOGS -->
 <div id="bottom-half">
     <div id="controls-panel">
         <h3 style="margin:0; color:#fff; border-bottom:1px solid #333; padding-bottom:10px;">Réglages 3D</h3>
         <div class="slider-group">
-            <label for="camZ">Zoom (Profondeur) : <span id="valZ">25</span>m</label>
-            <!-- Zoom max passé à 500 -->
-            <input type="range" id="camZ" min="2" max="500" step="1" value="25">
+            <label for="camZ">Zoom (Profondeur) : <span id="valZ">4</span>m</label>
+            <input type="range" id="camZ" min="1" max="20" step="0.5" value="4">
         </div>
         <div class="slider-group">
             <label for="targetY">Hauteur (Cadrage Y) : <span id="valY">1.0</span></label>
-            <input type="range" id="targetY" min="-5" max="20" step="0.5" value="1.0">
+            <input type="range" id="targetY" min="-2" max="4" step="0.1" value="1.0">
         </div>
     </div>
-    <div id="log-panel">En attente de connexion...</div>
+    <div id="log-panel">Initialisation du système...</div>
 </div>
 
 <script>
 // ==========================================
-// 1. MAPPING EXACT DU SQUELETTE (Modèle Xbot)
+// 1. MAPPING EXACT DU SQUELETTE (Xbot)
 // ==========================================
 const BONE_MAPPING = {
     leftShoulder: "mixamorigLeftArm", 
@@ -104,11 +81,11 @@ const BONE_MAPPING = {
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 
-let currentCamZ = 25; 
+// Caméra rapprochée (Z=4) pour un modèle à échelle humaine
+let currentCamZ = 4; 
 let currentTargetY = 1.0;
 
-// Caméra avec une vue de profondeur allant jusqu'à 1000 pour englober le zoom à 500
-const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
 camera.position.set(0, currentTargetY, currentCamZ);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -125,14 +102,17 @@ const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
 dirLight.position.set(2, 5, 5);
 scene.add(dirLight);
 
+// Ajout d'une grille au sol pour mieux repérer l'espace 3D
+const gridHelper = new THREE.GridHelper(10, 10, 0x00ffcc, 0x333333);
+gridHelper.position.y = -1; // Le sol est à Y=-1
+scene.add(gridHelper);
+
 // ==========================================
-// 3. CHARGEMENT DU GLB (Depuis le CDN)
+// 3. CHARGEMENT DU GLB (Depuis GitHub via jsDelivr)
 // ==========================================
 let avatarBones = {};
-let extractedBonesList = [];
 const loader = new THREE.GLTFLoader();
 
-// Chargement direct du Xbot depuis le dépôt GitHub via jsDelivr
 loader.load('./Xbot.glb', (gltf) => {
     const model = gltf.scene;
     
@@ -142,36 +122,40 @@ loader.load('./Xbot.glb', (gltf) => {
 
     model.traverse((child) => {
         if (child.isMesh) child.material = shinyMaterial;
-        if (child.isBone) {
-            avatarBones[child.name] = child;
-            extractedBonesList.push(child.name);
-        }
+        if (child.isBone) avatarBones[child.name] = child;
     });
 
-    model.position.y = -1; // Ajustement global du mannequin
+    model.position.y = -1; // Les pieds touchent la grille
     scene.add(model);
     document.getElementById('loading').style.display = 'none';
+}, undefined, (error) => {
+    console.error(error);
+    document.getElementById('log-panel').innerText = "❌ Erreur de chargement du Xbot.glb";
 });
 
 // ==========================================
 // 4. LECTURE JSON & LECTEUR CLOUDFLARE
 // ==========================================
 let posesData = [];
-let currentVideoTime = 0; 
+const logPanel = document.getElementById('log-panel');
 const player = Stream(document.getElementById('stream-player'));
 
-// Écoute du temps Cloudflare en temps réel
-player.addEventListener('timeupdate', (event) => {
-    currentVideoTime = event.currentTime;
-});
+logPanel.innerText = "⏳ Téléchargement des données IA...";
 
-fetch('AI-91439178d0ba03300cb99962fd9fbd02.json')
-    .then(res => res.text())
+fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
+    .then(res => {
+        if(!res.ok) throw new Error("Fichier introuvable sur le serveur Vercel");
+        return res.text();
+    })
     .then(text => {
         const lines = text.trim().split('\n');
         for(let i = 1; i < lines.length; i++) {
             posesData.push(JSON.parse(lines[i]));
         }
+        logPanel.innerText = `✅ JSON chargé avec succès (${posesData.length} frames) !\n▶️ Lancez la vidéo pour démarrer l'animation.`;
+    })
+    .catch(err => {
+        logPanel.innerText = `❌ ERREUR JSON : ${err.message}`;
     });
 
 function getMetricPoint(frameData, k) {
@@ -180,82 +164,67 @@ function getMetricPoint(frameData, k) {
 }
 
 // ==========================================
-// 🔥 5. MOTEUR QUATERNIONS (Cinématique)
+// 5. MOTEUR QUATERNIONS (Cinématique)
 // ==========================================
+const targetWorldPos = new THREE.Vector3();
 function pointBoneTo(bone, startPos, endPos) {
     if(!bone || !startPos || !endPos) return;
 
-    // 1. Vecteur directionnel (Le mouvement MediaPipe)
     const targetDir = new THREE.Vector3().subVectors(endPos, startPos).normalize();
-    
-    // 2. Axe naturel de l'os (Généralement Y pour un rigging classique Mixamo)
-    const boneAxis = new THREE.Vector3(0, 1, 0);
-
-    // 3. Calcul de la rotation absolue cible
+    const boneAxis = new THREE.Vector3(0, 1, 0); // L'axe Y est l'axe des os de Xbot
     const targetQuat = new THREE.Quaternion().setFromUnitVectors(boneAxis, targetDir);
 
-    // 4. Calcul de la rotation locale (On annule la rotation du parent)
     const parentQuat = new THREE.Quaternion();
     if (bone.parent) {
         bone.parent.updateWorldMatrix(true, false); 
         bone.parent.getWorldQuaternion(parentQuat);
     }
     
-    // Formule mathématique : Quaternion Local = Inverse(Parent Global) * Cible
     const localQuat = parentQuat.invert().multiply(targetQuat);
-    
-    // 5. Application propre sans torsion
     bone.quaternion.copy(localQuat);
 }
-
-const logPanel = document.getElementById('log-panel');
 
 function animate() {
     requestAnimationFrame(animate);
 
-    if (posesData.length > 0 && currentVideoTime > 0) {
+    if (posesData.length > 0 && player) {
+        // Lecture directe et synchrone du temps vidéo
+        const currentTime = player.currentTime;
         
-        // On récupère la ligne JSON correspondant à la milliseconde actuelle
-        const frame = posesData.find(p => Math.abs(p[0] - currentVideoTime) < 0.04) || posesData[Math.floor(currentVideoTime * 25)];
-        
-        if (frame) {
-            const lShoulder = getMetricPoint(frame, 3);
-            const lElbow = getMetricPoint(frame, 5);
-            const lWrist = getMetricPoint(frame, 7);
-
-            const rShoulder = getMetricPoint(frame, 4);
-            const rElbow = getMetricPoint(frame, 6);
-            const rWrist = getMetricPoint(frame, 8);
-
-            const lHip = getMetricPoint(frame, 11);
-            const lKnee = getMetricPoint(frame, 13);
-            const lAnkle = getMetricPoint(frame, 15);
-
-            const rHip = getMetricPoint(frame, 12);
-            const rKnee = getMetricPoint(frame, 14);
-            const rAnkle = getMetricPoint(frame, 16);
-
-            // ANIMATION DES MEMBRES SUPÉRIEURS
-            pointBoneTo(avatarBones[BONE_MAPPING.leftShoulder], lShoulder, lElbow);
-            pointBoneTo(avatarBones[BONE_MAPPING.rightShoulder], rShoulder, rElbow);
+        if (typeof currentTime === 'number' && currentTime > 0) {
+            const frame = posesData.find(p => Math.abs(p[0] - currentTime) < 0.04) || posesData[Math.floor(currentTime * 25)];
             
-            // ANIMATION DES ARTICULATIONS ENFANTS
-            pointBoneTo(avatarBones[BONE_MAPPING.leftElbow], lElbow, lWrist);
-            pointBoneTo(avatarBones[BONE_MAPPING.rightElbow], rElbow, rWrist);
+            if (frame) {
+                const lShoulder = getMetricPoint(frame, 3);
+                const lElbow = getMetricPoint(frame, 5);
+                const lWrist = getMetricPoint(frame, 7);
 
-            // MEMBRES INFÉRIEURS
-            pointBoneTo(avatarBones[BONE_MAPPING.leftHip], lHip, lKnee);
-            pointBoneTo(avatarBones[BONE_MAPPING.rightHip], rHip, rKnee);
-            pointBoneTo(avatarBones[BONE_MAPPING.leftKnee], lKnee, lAnkle);
-            pointBoneTo(avatarBones[BONE_MAPPING.rightKnee], rKnee, rAnkle);
+                const rShoulder = getMetricPoint(frame, 4);
+                const rElbow = getMetricPoint(frame, 6);
+                const rWrist = getMetricPoint(frame, 8);
 
-            // TÉLÉMÉTRIE
-            logPanel.innerText = `[EN DIRECT] Temps Vidéo : ${currentVideoTime.toFixed(3)}s | Frame JSON : ${frame[0].toFixed(2)}s\n\n`
-                + `--- DONNÉES BIOMÉCANIQUES (Mètres) ---\n`
-                + `Épaule G  : X ${lShoulder.x.toFixed(3)} | Y ${lShoulder.y.toFixed(3)} | Z ${lShoulder.z.toFixed(3)}\n`
-                + `Épaule D  : X ${rShoulder.x.toFixed(3)} | Y ${rShoulder.y.toFixed(3)} | Z ${rShoulder.z.toFixed(3)}\n\n`
-                + `--- LISTE DES OS DU GLB ---\n`
-                + extractedBonesList.join('\n');
+                const lHip = getMetricPoint(frame, 11);
+                const lKnee = getMetricPoint(frame, 13);
+                const lAnkle = getMetricPoint(frame, 15);
+
+                const rHip = getMetricPoint(frame, 12);
+                const rKnee = getMetricPoint(frame, 14);
+                const rAnkle = getMetricPoint(frame, 16);
+
+                pointBoneTo(avatarBones[BONE_MAPPING.leftShoulder], lShoulder, lElbow);
+                pointBoneTo(avatarBones[BONE_MAPPING.rightShoulder], rShoulder, rElbow);
+                pointBoneTo(avatarBones[BONE_MAPPING.leftElbow], lElbow, lWrist);
+                pointBoneTo(avatarBones[BONE_MAPPING.rightElbow], rElbow, rWrist);
+                pointBoneTo(avatarBones[BONE_MAPPING.leftHip], lHip, lKnee);
+                pointBoneTo(avatarBones[BONE_MAPPING.rightHip], rHip, rKnee);
+                pointBoneTo(avatarBones[BONE_MAPPING.leftKnee], lKnee, lAnkle);
+                pointBoneTo(avatarBones[BONE_MAPPING.rightKnee], rKnee, rAnkle);
+
+                logPanel.innerText = `[EN DIRECT] Temps Vidéo : ${currentTime.toFixed(3)}s | Frame JSON : ${frame[0].toFixed(2)}s\n\n`
+                    + `--- DONNÉES BIOMÉCANIQUES (Mètres) ---\n`
+                    + `Épaule G  : X ${lShoulder.x.toFixed(3)} | Y ${lShoulder.y.toFixed(3)} | Z ${lShoulder.z.toFixed(3)}\n`
+                    + `Épaule D  : X ${rShoulder.x.toFixed(3)} | Y ${rShoulder.y.toFixed(3)} | Z ${rShoulder.z.toFixed(3)}`;
+            }
         }
     }
 
@@ -265,7 +234,7 @@ function animate() {
 animate();
 
 // ==========================================
-// 6. GESTION DES EVENEMENTS (Sliders & Resize)
+// 6. GESTION DES EVENEMENTS
 // ==========================================
 document.getElementById('camZ').addEventListener('input', (e) => {
     currentCamZ = parseFloat(e.target.value);
