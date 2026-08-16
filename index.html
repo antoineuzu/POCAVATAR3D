@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Prototype 3D Hdance - Fixed Skinning & Full Telemetry</title>
+    <title>POC Hdance - 10 Tests de Déformation 3D</title>
     <style>
         body, html { 
             margin: 0; padding: 0; height: 100%; 
@@ -18,26 +18,22 @@
         #canvas-container { flex: 1; position: relative; background: #1a1a1a; }
         #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #00ffcc; font-weight: bold; font-size: 1.2rem; pointer-events: none; text-align: center; }
 
-        #bottom-half { height: 280px; display: flex; background: #0a0a0a; }
-        #controls-panel { width: 280px; padding: 15px; border-right: 2px solid #333; display: flex; flex-direction: column; gap: 12px; }
+        #bottom-half { height: 320px; display: flex; background: #0a0a0a; }
+        #controls-panel { width: 320px; padding: 15px; border-right: 2px solid #333; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
         .slider-group { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #00ffcc; }
         input[type=range] { cursor: pointer; width: 100%; }
         
         .btn-action { background: #00ffcc; color: #000; padding: 8px; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; font-size: 12px; }
         .btn-action:hover { background: #00cca3; }
+        
+        select { background: #222; color: #00ffcc; border: 1px solid #00ffcc; padding: 8px; font-weight: bold; border-radius: 4px; outline: none; cursor: pointer; }
 
         #log-panel { flex: 1; padding: 12px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 11px; color: #00ff66; white-space: pre-wrap; line-height: 1.3; background: #050505; }
-        .log-section { color: #00ffcc; font-weight: bold; margin-top: 5px; text-decoration: underline; }
-        .log-warn { color: #ffcc00; }
-        .log-err { color: #ff4444; }
     </style>
     
-    <!-- Librairies Three.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-    
-    <!-- SDK Cloudflare Stream -->
     <script src="https://embed.cloudflarestream.com/embed/sdk.latest.js"></script>
 </head>
 <body>
@@ -47,22 +43,34 @@
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
     <div id="canvas-container">
-        <div id="loading">Chargement IA & 3D (1.glb)...<br><span id="loading-details" style="font-size: 0.8rem; color: #aaa;"></span></div>
+        <div id="loading">Chargement POC...<br><span id="loading-details" style="font-size: 0.8rem; color: #aaa;"></span></div>
     </div>
 </div>
 
 <div id="bottom-half">
     <div id="controls-panel">
-        <h3 style="margin:0; color:#fff; border-bottom:1px solid #333; padding-bottom:5px; font-size:14px;">Réglages & Test</h3>
+        <h3 style="margin:0; color:#fff; border-bottom:1px solid #333; padding-bottom:5px; font-size:14px;">🛠 Banc d'Essai (POC)</h3>
+        
+        <label style="font-size: 12px; color: #aaa;">Sélectionnez une méthode de test :</label>
+        <select id="test-selector">
+            <option value="1">Test 1: Classic LookAt (Base)</option>
+            <option value="2" selected>Test 2: Local Quat Inverse</option>
+            <option value="3">Test 3: Global Quat Brut</option>
+            <option value="4">Test 4: BindMode Attached + Skin Update</option>
+            <option value="5">Test 5: MatrixAutoUpdate False</option>
+            <option value="6">Test 6: Skeleton Pose Reset Loop</option>
+            <option value="7">Test 7: Euler Rotation Directe</option>
+            <option value="8">Test 8: Full Scene Traverse Update</option>
+            <option value="9">Test 9: Override Local Matrix</option>
+            <option value="10">Test 10: Dynamic Re-bind Skeleton</option>
+        </select>
+
         <button id="btn-force-play" class="btn-action">▶ Forcer la lecture 3D</button>
         <button id="toggle-debug" class="btn-action" style="background:#444; color:#fff;">Masquer Sphères IA</button>
+        
         <div class="slider-group">
-            <label for="camZ">Zoom (Profondeur) : <span id="valZ">3.0</span>m</label>
+            <label for="camZ">Zoom : <span id="valZ">3.0</span>m</label>
             <input type="range" id="camZ" min="0.5" max="10" step="0.1" value="3.0">
-        </div>
-        <div class="slider-group">
-            <label for="targetY">Hauteur (Cadrage Y) : <span id="valY">0.0</span></label>
-            <input type="range" id="targetY" min="-3" max="5" step="0.1" value="0.0">
         </div>
     </div>
     <div id="log-panel">Initialisation du diagnostic système...</div>
@@ -70,375 +78,256 @@
 
 <script>
 // ==========================================
-// 1. MAPPING FLEXIBLE DES OS
+// 1. MAPPING FLEXIBLE
 // ==========================================
 const BONE_KEYWORDS = {
-    hips: "Hips",
-    spine: "Spine",
-    neck: "Neck",
-    head: "Head",
-    leftShoulder: "LeftArm", 
-    rightShoulder: "RightArm",
-    leftElbow: "LeftForeArm",
-    rightElbow: "RightForeArm",
-    leftHand: "LeftHand",
-    rightHand: "RightHand",
-    leftHip: "LeftUpLeg",
-    rightHip: "RightUpLeg",
-    leftKnee: "LeftLeg",
-    rightKnee: "RightLeg",
-    leftAnkle: "LeftFoot",
-    rightAnkle: "RightFoot"
+    hips: "Hips", spine: "Spine", neck: "Neck", head: "Head",
+    leftShoulder: "LeftArm", rightShoulder: "RightArm",
+    leftElbow: "LeftForeArm", rightElbow: "RightForeArm",
+    leftHip: "LeftUpLeg", rightHip: "RightUpLeg",
+    leftKnee: "LeftLeg", rightKnee: "RightLeg"
 };
 
-const MEDIAPIPE_NAMES = [
-    "0: Nez", "1: Oeil G", "2: Oeil D", "3: Épaule G", "4: Épaule D",
-    "5: Coude G", "6: Coude D", "7: Poignet G", "8: Poignet D", "9: Index G",
-    "10: Index D", "11: Hanche G", "12: Hanche D", "13: Genou G", "14: Genou D",
-    "15: Cheville G", "16: Cheville D", "17: Talon G", "18: Talon D", "19: Pied G", "20: Pied D"
-];
-
 // ==========================================
-// 2. SCÈNE 3D ET RENDERER
+// 2. SCÈNE 3D
 // ==========================================
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
-
-let currentCamZ = 3.0; 
-let currentTargetY = 0.0;
-let showDebugSpheres = true;
-
 const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
-camera.position.set(0, currentTargetY, currentCamZ);
-
+camera.position.set(0, 0.5, 3.0);
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setSize(container.clientWidth, container.clientHeight);
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.0;
 container.appendChild(renderer.domElement);
 
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
-controls.target.set(0, currentTargetY, 0);
+controls.target.set(0, 0.5, 0);
 controls.update();
 
-// Éclairage Studio Bleu Satiné
 scene.add(new THREE.AmbientLight(0x404050, 1.2));
 const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
 keyLight.position.set(3, 5, 4);
 scene.add(keyLight);
+scene.add(new THREE.GridHelper(10, 10, 0x00ffcc, 0x333333));
 
-const fillLight = new THREE.DirectionalLight(0x00aaff, 0.8);
-fillLight.position.set(-4, 2, -2);
-scene.add(fillLight);
-
-const gridHelper = new THREE.GridHelper(10, 10, 0x00ffcc, 0x333333);
-gridHelper.position.y = -1;
-scene.add(gridHelper);
-
-// Sphères de debug
 const debugSpheres = [];
 const sphereGeo = new THREE.SphereGeometry(0.025, 16, 16);
-const materialLeft = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-const materialRight = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-const materialCenter = new THREE.MeshBasicMaterial({ color: 0xffffff });
+const matRed = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+const matGreen = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
 
-for(let i = 0; i < 21; i++) {
-    let mat = materialCenter;
-    if(i % 2 !== 0) mat = materialLeft;
-    if(i > 0 && i % 2 === 0) mat = materialRight;
-    
-    const sphere = new THREE.Mesh(sphereGeo, mat);
-    scene.add(sphere);
-    debugSpheres.push(sphere);
+for(let i=0; i<21; i++) {
+    const mesh = new THREE.Mesh(sphereGeo, i%2 !== 0 ? matRed : matGreen);
+    scene.add(mesh);
+    debugSpheres.push(mesh);
 }
 
 // ==========================================
-// 3. STATUTS MODULES & CHARGEMENT GLB (LIAISON FORCEE)
+// 3. CHARGEMENT
 // ==========================================
-let avatarModel = null;
-let avatarBones = {};
-let skinnedMeshes = [];
-let isModelLoaded = false;
-let isJsonLoaded = false;
+let avatarModel = null, avatarBones = {}, skinnedMeshes = [], skeletonRef = null;
+let isModelLoaded = false, isJsonLoaded = false;
+let currentMethod = 2; // Test par défaut
 
 const logPanel = document.getElementById('log-panel');
-const loadingDetails = document.getElementById('loading-details');
+let sysLogs = "=== CHARGEMENT ===\n";
 
-let moduleLogs = "=== CHARGEMENT ET CONNEXION DES MODULES ===\n";
-moduleLogs += "✔ THREE.js : Version r128 chargée\n";
-moduleLogs += "✔ OrbitControls : Initialisés\n";
-
-const loader = new THREE.GLTFLoader();
-loadingDetails.innerText = "Chargement du modèle 1.glb...";
-
-loader.load('./1.glb', (gltf) => {
+new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     avatarModel = gltf.scene;
+    gltf.animations = [];
     
-    if (gltf.animations && gltf.animations.length) {
-        gltf.animations = [];
-    }
-
-    const customMaterial = new THREE.MeshStandardMaterial({
-        color: 0x0088cc,
-        roughness: 0.3,
-        metalness: 0.2
+    avatarModel.traverse((child) => {
+        if (child.isMesh) {
+            child.material = new THREE.MeshStandardMaterial({ color: 0x0088cc, roughness: 0.3 });
+            if (child.isSkinnedMesh) {
+                skinnedMeshes.push(child);
+                skeletonRef = child.skeleton;
+            }
+        }
     });
 
     const allNodes = [];
-    avatarModel.traverse((child) => {
-        if (child.isMesh) {
-            child.material = customMaterial;
-            if (child.isSkinnedMesh) {
-                skinnedMeshes.push(child);
-                child.bindMode = "attached";
-                child.normalizeSkinWeights();
-            }
-        }
-        if (child.name) allNodes.push(child);
-    });
-
-    moduleLogs += `✔ GLTFLoader : 1.glb chargé (${allNodes.length} nœuds détectés)\n`;
-    moduleLogs += `✔ SkinnedMesh : ${skinnedMeshes.length} maillage(s) rattaché(s)\n`;
-
-    let mappedCount = 0;
-    for (const [logicalName, keyword] of Object.entries(BONE_KEYWORDS)) {
-        const matchedNode = allNodes.find(node => node.name.toLowerCase().includes(keyword.toLowerCase()));
-        if (matchedNode) {
-            avatarBones[logicalName] = matchedNode;
-            mappedCount++;
-        }
+    avatarModel.traverse(c => allNodes.push(c));
+    for (const [logic, key] of Object.entries(BONE_KEYWORDS)) {
+        const match = allNodes.find(n => n.name.toLowerCase().includes(key.toLowerCase()));
+        if(match) avatarBones[logic] = match;
     }
 
-    moduleLogs += `✔ Squelette Armature : ${mappedCount}/16 os connectés au dictionnaire\n`;
-
-    const bbox = new THREE.Box3().setFromObject(avatarModel);
-    const size = bbox.getSize(new THREE.Vector3());
-    if (size.y > 0) {
-        const scaleFactor = 1.8 / size.y;
-        avatarModel.scale.set(scaleFactor, scaleFactor, scaleFactor);
-    }
-    
-    avatarModel.position.set(0, 0, 0);
+    avatarModel.scale.set(0.01, 0.01, 0.01);
     scene.add(avatarModel);
-    
     isModelLoaded = true;
-    checkReadyAndInit();
-}, undefined, (err) => {
-    moduleLogs += `❌ GLTFLoader ERREUR : Impossible de charger 1.glb (${err.message})\n`;
-    logPanel.innerText = moduleLogs;
+    checkReady();
 });
 
-// ==========================================
-// 4. LECTURE JSON & SDK CLOUDFLARE
-// ==========================================
 let posesData = [];
-let currentVideoTime = 0; 
-let isManualPlaying = false;
-let manualStartTime = 0;
-
+let currentVideoTime = 0, isManualPlaying = false, manualStartTime = 0;
 const player = Stream(document.getElementById('stream-player'));
 
 player.addEventListener('play', () => { isManualPlaying = true; manualStartTime = Date.now() - (currentVideoTime * 1000); });
-player.addEventListener('pause', () => { isManualPlaying = false; });
-player.addEventListener('timeupdate', (e) => {
-    if(e.currentTime !== undefined && e.currentTime > 0) {
-        currentVideoTime = e.currentTime;
-    }
-});
+player.addEventListener('timeupdate', (e) => { if(e.currentTime > 0) currentVideoTime = e.currentTime; });
 
 fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
-    .then(res => res.text())
-    .then(text => {
-        const lines = text.trim().split('\n');
-        for(let i = 1; i < lines.length; i++) {
-            posesData.push(JSON.parse(lines[i]));
-        }
-        moduleLogs += `✔ JSON MediaPipe : Chargé (${posesData.length} frames enregistrées)\n`;
-        isJsonLoaded = true;
-        checkReadyAndInit();
-    })
-    .catch(err => {
-        moduleLogs += `❌ JSON ERREUR : ${err.message}\n`;
-        logPanel.innerText = moduleLogs;
+    .then(r => r.text()).then(text => {
+        text.trim().split('\n').slice(1).forEach(l => posesData.push(JSON.parse(l)));
+        isJsonLoaded = true; checkReady();
     });
 
-function checkReadyAndInit() {
+function checkReady() {
     if (isModelLoaded && isJsonLoaded) {
         document.getElementById('loading').style.display = 'none';
-        logPanel.innerText = moduleLogs + "\n▶ SYSTÈME PRÊT : Calibrage de la Frame 0 terminé.";
-        applyPose(posesData[0]);
     }
 }
 
 // ==========================================
-// 5. MOTEUR CINÉMATIQUE & UPDATE MATRICES
+// 4. MOTEUR DES 10 TESTS
 // ==========================================
-function getMetricPoint(frameData, k) {
-    const startIdx = 133 + (k * 3);
-    return new THREE.Vector3(frameData[startIdx], -frameData[startIdx + 1], -frameData[startIdx + 2]);
+function getMetricPoint(frame, k) {
+    const idx = 133 + (k * 3);
+    return new THREE.Vector3(frame[idx], -frame[idx+1], -frame[idx+2]);
 }
 
-const boneRotationsLog = {};
+document.getElementById('test-selector').addEventListener('change', (e) => {
+    currentMethod = parseInt(e.target.value);
+    sysLogs = `⚠️ Méthode changée : Test ${currentMethod}\n`;
+});
 
-function orientBone(boneKey, boneObj, startPos, endPos, defaultAxis) {
-    if (!boneObj || !startPos || !endPos) return;
+function applyTestLogic(bone, startPos, endPos, axis, method) {
+    if(!bone || !startPos || !endPos) return;
+    
+    const dir = new THREE.Vector3().subVectors(endPos, startPos).normalize();
+    const targetQuat = new THREE.Quaternion().setFromUnitVectors(axis, dir);
 
-    const targetDir = new THREE.Vector3().subVectors(endPos, startPos).normalize();
-    const targetQuat = new THREE.Quaternion().setFromUnitVectors(defaultAxis, targetDir);
+    switch(method) {
+        case 1: // Classic LookAt
+            const targetPos = new THREE.Vector3().addVectors(bone.getWorldPosition(new THREE.Vector3()), dir);
+            bone.lookAt(targetPos);
+            bone.updateMatrixWorld(true);
+            break;
 
-    if (boneObj.parent) {
-        boneObj.parent.updateMatrixWorld(true);
-        const parentQuat = new THREE.Quaternion();
-        boneObj.parent.getWorldQuaternion(parentQuat);
-        targetQuat.premultiply(parentQuat.invert());
+        case 2: // Local Quat Inverse
+        case 4: // Sera complété dans applyPose
+            if (bone.parent) {
+                bone.parent.updateMatrixWorld(true);
+                const pQuat = new THREE.Quaternion();
+                bone.parent.getWorldQuaternion(pQuat);
+                targetQuat.premultiply(pQuat.invert());
+            }
+            bone.quaternion.copy(targetQuat);
+            bone.updateMatrixWorld(true);
+            break;
+
+        case 3: // Global Quat Brut
+            bone.quaternion.copy(targetQuat);
+            bone.updateMatrixWorld(true);
+            break;
+
+        case 5: // MatrixAutoUpdate False
+            bone.matrixAutoUpdate = false;
+            if (bone.parent) {
+                bone.parent.updateMatrixWorld(true);
+                const pQuat = new THREE.Quaternion();
+                bone.parent.getWorldQuaternion(pQuat);
+                targetQuat.premultiply(pQuat.invert());
+            }
+            bone.quaternion.copy(targetQuat);
+            bone.updateMatrix();
+            bone.matrixWorldNeedsUpdate = true;
+            break;
+
+        case 6: // Pose Reset
+            if (skeletonRef) skeletonRef.pose();
+            bone.quaternion.copy(targetQuat);
+            bone.updateMatrixWorld(true);
+            break;
+
+        case 7: // Euler Direct
+            const euler = new THREE.Euler().setFromQuaternion(targetQuat, 'XYZ');
+            bone.rotation.set(euler.x, euler.y, euler.z);
+            bone.updateMatrixWorld(true);
+            break;
+
+        case 8: // Traverse update sera géré dans applyPose
+            bone.quaternion.copy(targetQuat);
+            break;
+            
+        case 9: // Override Matrix
+            bone.matrixAutoUpdate = false;
+            bone.matrix.makeRotationFromQuaternion(targetQuat);
+            bone.matrixWorldNeedsUpdate = true;
+            break;
+
+        case 10: // Dynamic Rebind géré dans applyPose
+            bone.quaternion.copy(targetQuat);
+            bone.updateMatrixWorld(true);
+            break;
     }
-
-    boneObj.quaternion.copy(targetQuat);
-    boneObj.updateMatrix();
-    boneObj.updateMatrixWorld(true);
-
-    const euler = new THREE.Euler().setFromQuaternion(targetQuat, 'XYZ');
-    boneRotationsLog[boneKey] = {
-        x: (euler.x * 180 / Math.PI).toFixed(1),
-        y: (euler.y * 180 / Math.PI).toFixed(1),
-        z: (euler.z * 180 / Math.PI).toFixed(1)
-    };
 }
 
 function applyPose(frame) {
     if (!frame) return;
 
-    for(let i = 0; i < 21; i++) {
+    for(let i=0; i<21; i++) {
         const pt = getMetricPoint(frame, i);
         if(debugSpheres[i]) debugSpheres[i].position.copy(pt);
     }
 
-    const nose = getMetricPoint(frame, 0);
-    const lShoulder = getMetricPoint(frame, 3);
-    const rShoulder = getMetricPoint(frame, 4);
-    const lElbow = getMetricPoint(frame, 5);
-    const rElbow = getMetricPoint(frame, 6);
-    const lWrist = getMetricPoint(frame, 7);
-    const rWrist = getMetricPoint(frame, 8);
-    const lHip = getMetricPoint(frame, 11);
-    const rHip = getMetricPoint(frame, 12);
-    const lKnee = getMetricPoint(frame, 13);
-    const rKnee = getMetricPoint(frame, 14);
-    const lAnkle = getMetricPoint(frame, 15);
-    const rAnkle = getMetricPoint(frame, 16);
+    const midHip = new THREE.Vector3().addVectors(getMetricPoint(frame, 11), getMetricPoint(frame, 12)).multiplyScalar(0.5);
+    const midShoulder = new THREE.Vector3().addVectors(getMetricPoint(frame, 3), getMetricPoint(frame, 4)).multiplyScalar(0.5);
 
-    const midHip = new THREE.Vector3().addVectors(lHip, rHip).multiplyScalar(0.5);
-    const midShoulder = new THREE.Vector3().addVectors(lShoulder, rShoulder).multiplyScalar(0.5);
-
-    if(avatarModel) {
-        avatarModel.position.copy(midHip);
-        avatarModel.updateMatrixWorld(true);
-    }
+    if(avatarModel) avatarModel.position.copy(midHip);
 
     const axisY = new THREE.Vector3(0, 1, 0);
-    const axisLeftArm = new THREE.Vector3(1, 0, 0);
-    const axisRightArm = new THREE.Vector3(-1, 0, 0);
+    const axisX = new THREE.Vector3(1, 0, 0);
+    const axisNX = new THREE.Vector3(-1, 0, 0);
 
-    orientBone('Spine', avatarBones.spine, midHip, midShoulder, axisY);
-    orientBone('Neck', avatarBones.neck, midShoulder, nose, axisY);
+    applyTestLogic(avatarBones.spine, midHip, midShoulder, axisY, currentMethod);
+    applyTestLogic(avatarBones.neck, midShoulder, getMetricPoint(frame, 0), axisY, currentMethod);
+    applyTestLogic(avatarBones.leftShoulder, getMetricPoint(frame, 3), getMetricPoint(frame, 5), axisX, currentMethod);
+    applyTestLogic(avatarBones.rightShoulder, getMetricPoint(frame, 4), getMetricPoint(frame, 6), axisNX, currentMethod);
+    applyTestLogic(avatarBones.leftElbow, getMetricPoint(frame, 5), getMetricPoint(frame, 7), axisX, currentMethod);
+    applyTestLogic(avatarBones.rightElbow, getMetricPoint(frame, 6), getMetricPoint(frame, 8), axisNX, currentMethod);
 
-    orientBone('LeftShoulder', avatarBones.leftShoulder, lShoulder, lElbow, axisLeftArm);
-    orientBone('RightShoulder', avatarBones.rightShoulder, rShoulder, rElbow, axisRightArm);
-    orientBone('LeftElbow', avatarBones.leftElbow, lElbow, lWrist, axisLeftArm);
-    orientBone('RightElbow', avatarBones.rightElbow, rElbow, rWrist, axisRightArm);
-
-    orientBone('LeftHip', avatarBones.leftHip, lHip, lKnee, axisY);
-    orientBone('RightHip', avatarBones.rightHip, rHip, rKnee, axisY);
-    orientBone('LeftKnee', avatarBones.leftKnee, lKnee, lAnkle, axisY);
-    orientBone('RightKnee', avatarBones.rightKnee, rKnee, rAnkle, axisY);
-
-    skinnedMeshes.forEach(mesh => {
-        if (mesh.skeleton) {
-            mesh.skeleton.update();
-        }
-    });
+    // Finalisations spécifiques par méthode
+    if (currentMethod === 4) {
+        skinnedMeshes.forEach(m => { m.bindMode = 'attached'; if(m.skeleton) m.skeleton.update(); });
+    }
+    if (currentMethod === 8) {
+        scene.traverse(c => { if(c.updateMatrixWorld) c.updateMatrixWorld(true); });
+    }
+    if (currentMethod === 10 && skeletonRef && skinnedMeshes[0]) {
+        skinnedMeshes.forEach(m => m.bind(new THREE.Skeleton(skeletonRef.bones)));
+    }
 }
 
 // ==========================================
-// 6. ANIMATION & TÉLÉMÉTRIE EXHAUSTIVE
+// 5. ANIMATION LOOP
 // ==========================================
-let lastLogTime = 0;
-
 function animate() {
     requestAnimationFrame(animate);
 
     if (posesData.length > 0) {
-        if(isManualPlaying) {
-            currentVideoTime = (Date.now() - manualStartTime) / 1000;
-        }
-
+        if(isManualPlaying) currentVideoTime = (Date.now() - manualStartTime) / 1000;
         const frame = posesData.find(p => Math.abs(p[0] - currentVideoTime) < 0.04) || posesData[Math.floor(currentVideoTime * 25) % posesData.length];
         
         if (frame) {
             applyPose(frame);
-
-            if(Date.now() - lastLogTime > 250) {
-                let txt = moduleLogs + "\n";
-                txt += "=== TÉLÉMÉTRIE DE SQUELETTE EN DIRECT ===\n";
-                txt += `⏱ Temps Vidéo: ${currentVideoTime.toFixed(3)}s | Frame JSON: ${frame[0].toFixed(3)}s | Mode: ${isManualPlaying ? "Horloge Interne" : "Synchro Stream"}\n\n`;
-
-                txt += "--- VERIFICATION DES MOVEMENTS / ROTATIONS DES OS (Degrés X, Y, Z) ---\n";
-                for(const [bName, rot] of Object.entries(boneRotationsLog)) {
-                    txt += `• ${bName.padEnd(14)} : Pitch=${rot.x.padStart(6)}° | Yaw=${rot.y.padStart(6)}° | Roll=${rot.z.padStart(6)}°\n`;
-                }
-
-                txt += "\n--- COORDONNÉES EN DIRECT DES 21 POINTS MEDIAPIPE (Mètres) ---\n";
-                for(let i = 0; i < 21; i++) {
-                    const pt = getMetricPoint(frame, i);
-                    txt += `[Point ${i.toString().padStart(2)}] ${MEDIAPIPE_NAMES[i].padEnd(15)} : X=${pt.x.toFixed(3)}m | Y=${pt.y.toFixed(3)}m | Z=${pt.z.toFixed(3)}m\n`;
-                }
-
-                logPanel.innerText = txt;
-                lastLogTime = Date.now();
-            }
+            logPanel.innerText = `[TEST ACTIF : ${currentMethod}]\nTemps: ${currentVideoTime.toFixed(2)}s\n` + sysLogs;
         }
     }
-
     renderer.render(scene, camera);
 }
-
 animate();
 
 // ==========================================
-// 7. ÉVÉNEMENTS HTML
+// 6. EVENT LISTENERS
 // ==========================================
 document.getElementById('btn-force-play').addEventListener('click', () => {
     isManualPlaying = !isManualPlaying;
     if(isManualPlaying) manualStartTime = Date.now() - (currentVideoTime * 1000);
-    document.getElementById('btn-force-play').innerText = isManualPlaying ? "⏸ Pause 3D" : "▶ Forcer la lecture 3D";
 });
-
 document.getElementById('toggle-debug').addEventListener('click', (e) => {
     showDebugSpheres = !showDebugSpheres;
     debugSpheres.forEach(s => s.visible = showDebugSpheres);
-    e.target.innerText = showDebugSpheres ? "Masquer Sphères IA" : "Afficher Sphères IA";
 });
-
-document.getElementById('camZ').addEventListener('input', (e) => {
-    currentCamZ = parseFloat(e.target.value);
-    camera.position.z = currentCamZ;
-    document.getElementById('valZ').innerText = currentCamZ;
-});
-
-document.getElementById('targetY').addEventListener('input', (e) => {
-    currentTargetY = parseFloat(e.target.value);
-    controls.target.y = currentTargetY;
-    camera.position.y = currentTargetY; 
-    controls.update();
-    document.getElementById('valY').innerText = currentTargetY.toFixed(1);
-});
-
-window.addEventListener('resize', () => {
-    camera.aspect = container.clientWidth / container.clientHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(container.clientWidth, container.clientHeight);
-});
+document.getElementById('camZ').addEventListener('input', (e) => { camera.position.z = e.target.value; });
 </script>
-
 </body>
 </html>
