@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Prototype 3D Hdance - Fixed Motion & Scale</title>
+    <title>Prototype 3D Hdance - Corrected T-Pose & Sync</title>
     <style>
         body, html { 
             margin: 0; padding: 0; height: 100%; 
@@ -27,7 +27,6 @@
         .debug-toggle.active { background: #00ffcc; color: #000; }
 
         #log-panel { flex: 1; padding: 15px; overflow-y: auto; font-family: monospace; font-size: 13px; color: #0f0; white-space: pre-wrap;}
-        .error-log { color: #ff4444; }
         .success-log { color: #00ffcc; }
     </style>
     
@@ -63,7 +62,7 @@
             <input type="range" id="targetY" min="-3" max="5" step="0.1" value="0.0">
         </div>
     </div>
-    <div id="log-panel">Initialisation du diagnostic...</div>
+    <div id="log-panel">Initialisation du système...</div>
 </div>
 
 <script>
@@ -121,7 +120,7 @@ const gridHelper = new THREE.GridHelper(10, 10, 0x00ffcc, 0x333333);
 gridHelper.position.y = -1;
 scene.add(gridHelper);
 
-// Sphères de debug calibrées à l'échelle métrique (Taille 3cm)
+// Sphères de debug
 const debugSpheres = [];
 const sphereGeo = new THREE.SphereGeometry(0.03, 16, 16);
 const materialLeft = new THREE.MeshBasicMaterial({ color: 0xff0000 });
@@ -139,11 +138,10 @@ for(let i = 0; i < 21; i++) {
 }
 
 // ==========================================
-// 3. CHARGEMENT DU GLB (Rescalé en mètres)
+// 3. CHARGEMENT DU GLB (Echelle 1:1)
 // ==========================================
 let avatarModel = null;
 let avatarBones = {};
-let diagnosticLogs = "";
 let isModelLoaded = false;
 let isJsonLoaded = false;
 
@@ -166,21 +164,13 @@ loader.load('./free_female_mannequin_base_mesh_2.glb', (gltf) => {
         if (child.name) allNodes.push(child);
     });
 
-    diagnosticLogs += "--- DIAGNOSTIC DES OS ---\n";
-    let foundCount = 0;
-
     for (const [logicalName, keyword] of Object.entries(BONE_KEYWORDS)) {
         const matchedNode = allNodes.find(node => node.name.includes(keyword));
         if (matchedNode) {
             avatarBones[logicalName] = matchedNode;
-            diagnosticLogs += `✅ ${logicalName} -> [${matchedNode.name}]\n`;
-            foundCount++;
-        } else {
-            diagnosticLogs += `❌ ${logicalName} introuvable\n`;
         }
     }
 
-    // Réduction de l'échelle du mannequin Mixamo pour le passer en mètres (1cm -> 0.01m)
     avatarModel.scale.set(0.01, 0.01, 0.01);
     avatarModel.position.set(0, 0, 0);
     
@@ -190,27 +180,24 @@ loader.load('./free_female_mannequin_base_mesh_2.glb', (gltf) => {
 });
 
 // ==========================================
-// 4. LECTURE JSON & SYNCHRO CLOUDFLARE STREAM
+// 4. LECTURE JSON & LECTEUR CLOUDFLARE
 // ==========================================
 let posesData = [];
 let currentVideoTime = 0; 
 const player = Stream(document.getElementById('stream-player'));
 
-// Écouteur synchrone Cloudflare + Fallback
-player.addEventListener('timeupdate', (event) => {
-    if(event.currentTime) currentVideoTime = event.currentTime;
+player.addEventListener('timeupdate', (e) => {
+    if(e.currentTime !== undefined) currentVideoTime = e.currentTime;
 });
 
-// Polling asynchrone sécurisé pour récupérer le temps sur tous les navigateurs
+// Synchro automatique permanente
 setInterval(() => {
     if(player && player.getCurrentTime) {
         player.getCurrentTime().then(t => {
-            if(t > 0) currentVideoTime = t;
+            if(t !== undefined) currentVideoTime = t;
         }).catch(()=>{});
     }
-}, 100);
-
-loadingDetails.innerText = "Téléchargement du JSON...";
+}, 40);
 
 fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
     .then(res => res.text())
@@ -219,7 +206,6 @@ fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
         for(let i = 1; i < lines.length; i++) {
             posesData.push(JSON.parse(lines[i]));
         }
-        diagnosticLogs += `\n✅ JSON MediaPipe chargé : ${posesData.length} frames.\n`;
         isJsonLoaded = true;
         checkReadyAndInit();
     });
@@ -227,26 +213,25 @@ fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
 function checkReadyAndInit() {
     if (isModelLoaded && isJsonLoaded) {
         document.getElementById('loading').style.display = 'none';
-        logPanel.innerHTML = `<span class="success-log">${diagnosticLogs}\n▶️ Synchronisation prête. Lancez la vidéo.</span>`;
-        applyPose(posesData[0]); // Application directe de la frame 0
+        logPanel.innerHTML = `<span class="success-log">✅ Synchro réussie (${posesData.length} frames).\n▶ Appuyez sur PLAY sur la vidéo pour démarrer le mouvement !</span>`;
+        applyPose(posesData[0]); // Pose Frame 0
     }
 }
 
 // ==========================================
-// 5. MOTEUR QUATERNIONS & POSITIONNEMENT
+// 5. MOTEUR QUATERNIONS AVEC AXES MIXAMO
 // ==========================================
 function getMetricPoint(frameData, k) {
     const startIdx = 133 + (k * 3);
-    // Coordonnées métriques MediaPipe
     return new THREE.Vector3(frameData[startIdx], -frameData[startIdx + 1], -frameData[startIdx + 2]);
 }
 
-function pointBoneTo(bone, startPos, endPos) {
+// Prise en compte de la T-Pose naturelle du modèle 3D
+function pointBoneTo(bone, startPos, endPos, defaultAxis = new THREE.Vector3(0, 1, 0)) {
     if(!bone || !startPos || !endPos) return;
 
     const targetDir = new THREE.Vector3().subVectors(endPos, startPos).normalize();
-    const boneAxis = new THREE.Vector3(0, 1, 0); 
-    const targetQuat = new THREE.Quaternion().setFromUnitVectors(boneAxis, targetDir);
+    const targetQuat = new THREE.Quaternion().setFromUnitVectors(defaultAxis, targetDir);
 
     const parentQuat = new THREE.Quaternion();
     if (bone.parent) {
@@ -261,15 +246,13 @@ function pointBoneTo(bone, startPos, endPos) {
 function applyPose(frame) {
     if (!frame) return;
 
-    // 1. Placement des sphères visuelles IA
+    // 1. Placement des sphères
     for(let i = 0; i < 21; i++) {
         const pt = getMetricPoint(frame, i);
-        if(debugSpheres[i]) {
-            debugSpheres[i].position.copy(pt);
-        }
+        if(debugSpheres[i]) debugSpheres[i].position.copy(pt);
     }
 
-    // 2. Extractions des articulations
+    // 2. Extractions des points clé MediaPipe
     const nose = getMetricPoint(frame, 0);
     const lShoulder = getMetricPoint(frame, 3);
     const rShoulder = getMetricPoint(frame, 4);
@@ -287,25 +270,29 @@ function applyPose(frame) {
     const midHip = new THREE.Vector3().addVectors(lHip, rHip).multiplyScalar(0.5);
     const midShoulder = new THREE.Vector3().addVectors(lShoulder, rShoulder).multiplyScalar(0.5);
 
-    // 3. Alignement de la racine du mannequin sur le bassin MediaPipe
+    // 3. Recalage du modèle sur les hanches
     if(avatarModel && avatarBones.hips) {
-        // Déplacement du modèle complet à la position centrale des hanches
         avatarModel.position.copy(midHip);
     }
 
-    // 4. Orientations des os
-    pointBoneTo(avatarBones.spine, midHip, midShoulder);
-    pointBoneTo(avatarBones.neck, midShoulder, nose);
+    // Axes de repos Mixamo : Bras gauche pointe à (+1,0,0), bras droit à (-1,0,0), jambes à (0,-1,0)
+    const axisY = new THREE.Vector3(0, 1, 0);
+    const axisLeftArm = new THREE.Vector3(1, 0, 0);
+    const axisRightArm = new THREE.Vector3(-1, 0, 0);
 
-    pointBoneTo(avatarBones.leftShoulder, lShoulder, lElbow);
-    pointBoneTo(avatarBones.rightShoulder, rShoulder, rElbow);
-    pointBoneTo(avatarBones.leftElbow, lElbow, lWrist);
-    pointBoneTo(avatarBones.rightElbow, rElbow, rWrist);
+    // 4. Orientation articulée
+    pointBoneTo(avatarBones.spine, midHip, midShoulder, axisY);
+    pointBoneTo(avatarBones.neck, midShoulder, nose, axisY);
 
-    pointBoneTo(avatarBones.leftHip, lHip, lKnee);
-    pointBoneTo(avatarBones.rightHip, rHip, rKnee);
-    pointBoneTo(avatarBones.leftKnee, lKnee, lAnkle);
-    pointBoneTo(avatarBones.rightKnee, rKnee, rAnkle);
+    pointBoneTo(avatarBones.leftShoulder, lShoulder, lElbow, axisLeftArm);
+    pointBoneTo(avatarBones.rightShoulder, rShoulder, rElbow, axisRightArm);
+    pointBoneTo(avatarBones.leftElbow, lElbow, lWrist, axisLeftArm);
+    pointBoneTo(avatarBones.rightElbow, rElbow, rWrist, axisRightArm);
+
+    pointBoneTo(avatarBones.leftHip, lHip, lKnee, axisY);
+    pointBoneTo(avatarBones.rightHip, rHip, rKnee, axisY);
+    pointBoneTo(avatarBones.leftKnee, lKnee, lAnkle, axisY);
+    pointBoneTo(avatarBones.rightKnee, rKnee, rAnkle, axisY);
 }
 
 let lastLogTime = 0;
@@ -313,16 +300,16 @@ function animate() {
     requestAnimationFrame(animate);
 
     if (posesData.length > 0) {
-        // Recherche de la frame active
+        // Recherche de la frame correspondant au temps de la vidéo
         const frame = posesData.find(p => Math.abs(p[0] - currentVideoTime) < 0.04) || posesData[Math.floor(currentVideoTime * 25)];
         
         if (frame) {
             applyPose(frame);
 
-            if(Date.now() - lastLogTime > 200) {
+            if(Date.now() - lastLogTime > 250) {
                 logPanel.innerText = `[TÉLÉMÉTRIE EN DIRECT]\n`
                     + `▶ Temps Vidéo : ${currentVideoTime.toFixed(3)}s | Frame JSON : ${frame[0].toFixed(3)}s\n`
-                    + `Statut : Avatar synchronisé à la même échelle que le squelette IA.`;
+                    + `L'avatar suit la vidéo en temps réel.`;
                 lastLogTime = Date.now();
             }
         }
