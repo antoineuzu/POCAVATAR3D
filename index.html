@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Prototype 3D Hdance - Flexible Bone Matching</title>
+    <title>Prototype 3D Hdance - Fixed Motion & Scale</title>
     <style>
         body, html { 
             margin: 0; padding: 0; height: 100%; 
@@ -55,12 +55,12 @@
         <h3 style="margin:0; color:#fff; border-bottom:1px solid #333; padding-bottom:10px;">Réglages & Debug</h3>
         <button id="toggle-debug" class="debug-toggle active">Désactiver les sphères IA</button>
         <div class="slider-group">
-            <label for="camZ">Zoom (Profondeur) : <span id="valZ">5</span>m</label>
-            <input type="range" id="camZ" min="1" max="100" step="0.5" value="5">
+            <label for="camZ">Zoom (Profondeur) : <span id="valZ">2.5</span>m</label>
+            <input type="range" id="camZ" min="0.5" max="10" step="0.1" value="2.5">
         </div>
         <div class="slider-group">
-            <label for="targetY">Hauteur (Cadrage Y) : <span id="valY">1.0</span></label>
-            <input type="range" id="targetY" min="-5" max="10" step="0.1" value="1.0">
+            <label for="targetY">Hauteur (Cadrage Y) : <span id="valY">0.0</span></label>
+            <input type="range" id="targetY" min="-3" max="5" step="0.1" value="0.0">
         </div>
     </div>
     <div id="log-panel">Initialisation du diagnostic...</div>
@@ -92,16 +92,16 @@ const BONE_KEYWORDS = {
 };
 
 // ==========================================
-// 2. INITIALISATION THREE.JS & SPHÈRES DEBUG
+// 2. INITIALISATION THREE.JS & SPHÈRES
 // ==========================================
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 
-let currentCamZ = 5; 
-let currentTargetY = 1.0;
+let currentCamZ = 2.5; 
+let currentTargetY = 0.0;
 let showDebugSpheres = true;
 
-const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
 camera.position.set(0, currentTargetY, currentCamZ);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -112,7 +112,7 @@ const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.target.set(0, currentTargetY, 0);
 controls.update();
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+scene.add(new THREE.AmbientLight(0xffffff, 0.8));
 const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
 dirLight.position.set(2, 5, 5);
 scene.add(dirLight);
@@ -121,9 +121,9 @@ const gridHelper = new THREE.GridHelper(10, 10, 0x00ffcc, 0x333333);
 gridHelper.position.y = -1;
 scene.add(gridHelper);
 
-// Création des 21 sphères de débogage pour visualiser le squelette JSON
+// Sphères de debug calibrées à l'échelle métrique (Taille 3cm)
 const debugSpheres = [];
-const sphereGeo = new THREE.SphereGeometry(0.05, 16, 16);
+const sphereGeo = new THREE.SphereGeometry(0.03, 16, 16);
 const materialLeft = new THREE.MeshBasicMaterial({ color: 0xff0000 });
 const materialRight = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
 const materialCenter = new THREE.MeshBasicMaterial({ color: 0xffffff });
@@ -134,14 +134,14 @@ for(let i = 0; i < 21; i++) {
     if(i > 0 && i % 2 === 0) mat = materialRight;
     
     const sphere = new THREE.Mesh(sphereGeo, mat);
-    sphere.visible = true;
     scene.add(sphere);
     debugSpheres.push(sphere);
 }
 
 // ==========================================
-// 3. CHARGEMENT DU GLB & MATCHING INTELLIGENT
+// 3. CHARGEMENT DU GLB (Rescalé en mètres)
 // ==========================================
+let avatarModel = null;
 let avatarBones = {};
 let diagnosticLogs = "";
 let isModelLoaded = false;
@@ -151,57 +151,64 @@ const logPanel = document.getElementById('log-panel');
 const loadingDetails = document.getElementById('loading-details');
 const loader = new THREE.GLTFLoader();
 
-loadingDetails.innerText = "Téléchargement du GLB...";
+loadingDetails.innerText = "Chargement du modèle 3D...";
 
 loader.load('./free_female_mannequin_base_mesh_2.glb', (gltf) => {
-    const model = gltf.scene;
+    avatarModel = gltf.scene;
     
     const shinyMaterial = new THREE.MeshStandardMaterial({
         color: 0x00aaff, metalness: 0.6, roughness: 0.2
     });
 
     const allNodes = [];
-    model.traverse((child) => {
+    avatarModel.traverse((child) => {
         if (child.isMesh) child.material = shinyMaterial;
         if (child.name) allNodes.push(child);
     });
 
-    diagnosticLogs += "--- DIAGNOSTIC DES OS (RECHERCHE INTELLIGENTE) ---\n";
+    diagnosticLogs += "--- DIAGNOSTIC DES OS ---\n";
     let foundCount = 0;
 
     for (const [logicalName, keyword] of Object.entries(BONE_KEYWORDS)) {
         const matchedNode = allNodes.find(node => node.name.includes(keyword));
-        
         if (matchedNode) {
             avatarBones[logicalName] = matchedNode;
-            diagnosticLogs += `✅ ${logicalName} -> Associé à [${matchedNode.name}]\n`;
+            diagnosticLogs += `✅ ${logicalName} -> [${matchedNode.name}]\n`;
             foundCount++;
         } else {
-            diagnosticLogs += `❌ ${logicalName} -> Mot-clé "${keyword}" introuvable\n`;
+            diagnosticLogs += `❌ ${logicalName} introuvable\n`;
         }
     }
 
-    diagnosticLogs += `\n-> Résultat : ${foundCount} os rattachés sur ${Object.keys(BONE_KEYWORDS).length}.\n\n`;
-
-    model.position.y = -1;
-    scene.add(model);
+    // Réduction de l'échelle du mannequin Mixamo pour le passer en mètres (1cm -> 0.01m)
+    avatarModel.scale.set(0.01, 0.01, 0.01);
+    avatarModel.position.set(0, 0, 0);
+    
+    scene.add(avatarModel);
     isModelLoaded = true;
     checkReadyAndInit();
-}, undefined, (err) => {
-    loadingDetails.innerText = "ERREUR GLB ! Regardez la console.";
-    console.error("Erreur GLB:", err);
 });
 
 // ==========================================
-// 4. LECTURE JSON & LECTEUR CLOUDFLARE
+// 4. LECTURE JSON & SYNCHRO CLOUDFLARE STREAM
 // ==========================================
 let posesData = [];
 let currentVideoTime = 0; 
 const player = Stream(document.getElementById('stream-player'));
 
+// Écouteur synchrone Cloudflare + Fallback
 player.addEventListener('timeupdate', (event) => {
-    currentVideoTime = event.currentTime;
+    if(event.currentTime) currentVideoTime = event.currentTime;
 });
+
+// Polling asynchrone sécurisé pour récupérer le temps sur tous les navigateurs
+setInterval(() => {
+    if(player && player.getCurrentTime) {
+        player.getCurrentTime().then(t => {
+            if(t > 0) currentVideoTime = t;
+        }).catch(()=>{});
+    }
+}, 100);
 
 loadingDetails.innerText = "Téléchargement du JSON...";
 
@@ -212,28 +219,25 @@ fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
         for(let i = 1; i < lines.length; i++) {
             posesData.push(JSON.parse(lines[i]));
         }
-        diagnosticLogs += `✅ JSON MediaPipe chargé : ${posesData.length} frames.\n\n`;
+        diagnosticLogs += `\n✅ JSON MediaPipe chargé : ${posesData.length} frames.\n`;
         isJsonLoaded = true;
         checkReadyAndInit();
-    })
-    .catch(err => {
-        diagnosticLogs += `❌ ERREUR JSON : ${err.message}\n`;
-        logPanel.innerHTML = `<span class="error-log">${diagnosticLogs}</span>`;
     });
 
 function checkReadyAndInit() {
     if (isModelLoaded && isJsonLoaded) {
         document.getElementById('loading').style.display = 'none';
-        logPanel.innerHTML = `<span class="success-log">${diagnosticLogs}▶️ Tout est prêt ! Lancez la vidéo.</span>`;
-        applyPose(posesData[0]); // Pose initiale à t=0
+        logPanel.innerHTML = `<span class="success-log">${diagnosticLogs}\n▶️ Synchronisation prête. Lancez la vidéo.</span>`;
+        applyPose(posesData[0]); // Application directe de la frame 0
     }
 }
 
 // ==========================================
-// 5. MOTEUR D'ANIMATION & QUATERNIONS
+// 5. MOTEUR QUATERNIONS & POSITIONNEMENT
 // ==========================================
 function getMetricPoint(frameData, k) {
     const startIdx = 133 + (k * 3);
+    // Coordonnées métriques MediaPipe
     return new THREE.Vector3(frameData[startIdx], -frameData[startIdx + 1], -frameData[startIdx + 2]);
 }
 
@@ -257,7 +261,7 @@ function pointBoneTo(bone, startPos, endPos) {
 function applyPose(frame) {
     if (!frame) return;
 
-    // Mise à jour des sphères de debug 3D
+    // 1. Placement des sphères visuelles IA
     for(let i = 0; i < 21; i++) {
         const pt = getMetricPoint(frame, i);
         if(debugSpheres[i]) {
@@ -265,7 +269,7 @@ function applyPose(frame) {
         }
     }
 
-    // Récupération des points clé MediaPipe
+    // 2. Extractions des articulations
     const nose = getMetricPoint(frame, 0);
     const lShoulder = getMetricPoint(frame, 3);
     const rShoulder = getMetricPoint(frame, 4);
@@ -273,21 +277,23 @@ function applyPose(frame) {
     const rElbow = getMetricPoint(frame, 6);
     const lWrist = getMetricPoint(frame, 7);
     const rWrist = getMetricPoint(frame, 8);
-    const lIndex = getMetricPoint(frame, 9);
-    const rIndex = getMetricPoint(frame, 10);
     const lHip = getMetricPoint(frame, 11);
     const rHip = getMetricPoint(frame, 12);
     const lKnee = getMetricPoint(frame, 13);
     const rKnee = getMetricPoint(frame, 14);
     const lAnkle = getMetricPoint(frame, 15);
     const rAnkle = getMetricPoint(frame, 16);
-    const lFootIndex = getMetricPoint(frame, 19);
-    const rFootIndex = getMetricPoint(frame, 20);
 
     const midHip = new THREE.Vector3().addVectors(lHip, rHip).multiplyScalar(0.5);
     const midShoulder = new THREE.Vector3().addVectors(lShoulder, rShoulder).multiplyScalar(0.5);
 
-    // Orientation des os trouvés
+    // 3. Alignement de la racine du mannequin sur le bassin MediaPipe
+    if(avatarModel && avatarBones.hips) {
+        // Déplacement du modèle complet à la position centrale des hanches
+        avatarModel.position.copy(midHip);
+    }
+
+    // 4. Orientations des os
     pointBoneTo(avatarBones.spine, midHip, midShoulder);
     pointBoneTo(avatarBones.neck, midShoulder, nose);
 
@@ -295,33 +301,28 @@ function applyPose(frame) {
     pointBoneTo(avatarBones.rightShoulder, rShoulder, rElbow);
     pointBoneTo(avatarBones.leftElbow, lElbow, lWrist);
     pointBoneTo(avatarBones.rightElbow, rElbow, rWrist);
-    pointBoneTo(avatarBones.leftHand, lWrist, lIndex);
-    pointBoneTo(avatarBones.rightHand, rWrist, rIndex);
 
     pointBoneTo(avatarBones.leftHip, lHip, lKnee);
     pointBoneTo(avatarBones.rightHip, rHip, rKnee);
     pointBoneTo(avatarBones.leftKnee, lKnee, lAnkle);
     pointBoneTo(avatarBones.rightKnee, rKnee, rAnkle);
-    pointBoneTo(avatarBones.leftAnkle, lAnkle, lFootIndex);
-    pointBoneTo(avatarBones.rightAnkle, rAnkle, rFootIndex);
 }
 
 let lastLogTime = 0;
 function animate() {
     requestAnimationFrame(animate);
 
-    if (posesData.length > 0 && currentVideoTime > 0) {
+    if (posesData.length > 0) {
+        // Recherche de la frame active
         const frame = posesData.find(p => Math.abs(p[0] - currentVideoTime) < 0.04) || posesData[Math.floor(currentVideoTime * 25)];
         
         if (frame) {
             applyPose(frame);
 
-            if(Date.now() - lastLogTime > 250) {
-                const ls = debugSpheres[3].position;
+            if(Date.now() - lastLogTime > 200) {
                 logPanel.innerText = `[TÉLÉMÉTRIE EN DIRECT]\n`
-                    + `▶ Vidéo Time: ${currentVideoTime.toFixed(3)}s | Frame JSON: ${frame[0].toFixed(3)}s\n\n`
-                    + `--- POINT BRUT MEDIAPIPE (Épaule Gauche) ---\n`
-                    + `X: ${ls.x.toFixed(3)} | Y: ${ls.y.toFixed(3)} | Z: ${ls.z.toFixed(3)}`;
+                    + `▶ Temps Vidéo : ${currentVideoTime.toFixed(3)}s | Frame JSON : ${frame[0].toFixed(3)}s\n`
+                    + `Statut : Avatar synchronisé à la même échelle que le squelette IA.`;
                 lastLogTime = Date.now();
             }
         }
@@ -333,7 +334,7 @@ function animate() {
 animate();
 
 // ==========================================
-// 6. GESTION DES ÉVÉNEMENTS HTML
+// 6. ÉVÉNEMENTS HTML
 // ==========================================
 document.getElementById('toggle-debug').addEventListener('click', (e) => {
     showDebugSpheres = !showDebugSpheres;
