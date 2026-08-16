@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Prototype 3D Hdance - DEBUG MODE</title>
+    <title>Prototype 3D Hdance - Flexible Bone Matching</title>
     <style>
         body, html { 
             margin: 0; padding: 0; height: 100%; 
@@ -68,25 +68,27 @@
 
 <script>
 // ==========================================
-// 1. MAPPING COMPLET DU SQUELETTE
+// 1. MAPPING DE RECHERCHE FLEXIBLE
 // ==========================================
-const BONE_MAPPING = {
-    hips: "mixamorig:Hips_01",
-    spine: "mixamorig:Spine_02",
-    neck: "mixamorig:Neck_05",
-    head: "mixamorig:Head_06",
-    leftShoulder: "mixamorig:LeftArm_09", 
-    rightShoulder: "mixamorig:RightArm_033",
-    leftElbow: "mixamorig:LeftForeArm_010",
-    rightElbow: "mixamorig:RightForeArm_034",
-    leftHand: "mixamorig:LeftHand_011",
-    rightHand: "mixamorig:RightHand_035",
-    leftHip: "mixamorig:LeftUpLeg_055",
-    rightHip: "mixamorig:RightUpLeg_060",
-    leftKnee: "mixamorig:LeftLeg_056",
-    rightKnee: "mixamorig:RightLeg_061",
-    leftAnkle: "mixamorig:LeftFoot_057",
-    rightAnkle: "mixamorig:RightFoot_062"
+const BONE_KEYWORDS = {
+    hips: "Hips",
+    spine: "Spine",
+    neck: "Neck",
+    head: "Head",
+    
+    leftShoulder: "LeftArm", 
+    rightShoulder: "RightArm",
+    leftElbow: "LeftForeArm",
+    rightElbow: "RightForeArm",
+    leftHand: "LeftHand",
+    rightHand: "RightHand",
+
+    leftHip: "LeftUpLeg",
+    rightHip: "RightUpLeg",
+    leftKnee: "LeftLeg",
+    rightKnee: "RightLeg",
+    leftAnkle: "LeftFoot",
+    rightAnkle: "RightFoot"
 };
 
 // ==========================================
@@ -119,17 +121,17 @@ const gridHelper = new THREE.GridHelper(10, 10, 0x00ffcc, 0x333333);
 gridHelper.position.y = -1;
 scene.add(gridHelper);
 
-// Création des 21 sphères de débogage pour voir l'IA pure
+// Création des 21 sphères de débogage pour visualiser le squelette JSON
 const debugSpheres = [];
 const sphereGeo = new THREE.SphereGeometry(0.05, 16, 16);
-const materialLeft = new THREE.MeshBasicMaterial({ color: 0xff0000 }); // Rouge pour la droite
-const materialRight = new THREE.MeshBasicMaterial({ color: 0x00ff00 }); // Vert pour la gauche
-const materialCenter = new THREE.MeshBasicMaterial({ color: 0xffffff }); // Blanc pour le centre
+const materialLeft = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+const materialRight = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+const materialCenter = new THREE.MeshBasicMaterial({ color: 0xffffff });
 
-for(let i=0; i<21; i++) {
+for(let i = 0; i < 21; i++) {
     let mat = materialCenter;
-    if(i%2 !== 0) mat = materialLeft; // Impairs (Gauche MediaPipe)
-    if(i > 0 && i%2 === 0) mat = materialRight; // Pairs (Droite MediaPipe)
+    if(i % 2 !== 0) mat = materialLeft;
+    if(i > 0 && i % 2 === 0) mat = materialRight;
     
     const sphere = new THREE.Mesh(sphereGeo, mat);
     sphere.visible = true;
@@ -138,7 +140,7 @@ for(let i=0; i<21; i++) {
 }
 
 // ==========================================
-// 3. CHARGEMENT DU GLB & DIAGNOSTIC
+// 3. CHARGEMENT DU GLB & MATCHING INTELLIGENT
 // ==========================================
 let avatarBones = {};
 let diagnosticLogs = "";
@@ -158,28 +160,30 @@ loader.load('./free_female_mannequin_base_mesh_2.glb', (gltf) => {
         color: 0x00aaff, metalness: 0.6, roughness: 0.2
     });
 
+    const allNodes = [];
     model.traverse((child) => {
         if (child.isMesh) child.material = shinyMaterial;
-        if (child.isBone) avatarBones[child.name] = child;
+        if (child.name) allNodes.push(child);
     });
 
-    // Diagnostic des os
+    diagnosticLogs += "--- DIAGNOSTIC DES OS (RECHERCHE INTELLIGENTE) ---\n";
     let foundCount = 0;
-    let totalExpected = Object.keys(BONE_MAPPING).length;
-    diagnosticLogs += "--- DIAGNOSTIC DES OS ---\n";
-    
-    for (const [logicalName, glbName] of Object.entries(BONE_MAPPING)) {
-        if (avatarBones[glbName]) {
-            diagnosticLogs += `✅ ${logicalName} connecté à [${glbName}]\n`;
+
+    for (const [logicalName, keyword] of Object.entries(BONE_KEYWORDS)) {
+        const matchedNode = allNodes.find(node => node.name.includes(keyword));
+        
+        if (matchedNode) {
+            avatarBones[logicalName] = matchedNode;
+            diagnosticLogs += `✅ ${logicalName} -> Associé à [${matchedNode.name}]\n`;
             foundCount++;
         } else {
-            diagnosticLogs += `❌ ${logicalName} INTROUVABLE (cherchait: ${glbName})\n`;
+            diagnosticLogs += `❌ ${logicalName} -> Mot-clé "${keyword}" introuvable\n`;
         }
     }
-    
-    diagnosticLogs += `\n-> Résultat : ${foundCount} os trouvés sur ${totalExpected}.\n\n`;
 
-    model.position.y = -1; // Ajustement global
+    diagnosticLogs += `\n-> Résultat : ${foundCount} os rattachés sur ${Object.keys(BONE_KEYWORDS).length}.\n\n`;
+
+    model.position.y = -1;
     scene.add(model);
     isModelLoaded = true;
     checkReadyAndInit();
@@ -221,24 +225,23 @@ function checkReadyAndInit() {
     if (isModelLoaded && isJsonLoaded) {
         document.getElementById('loading').style.display = 'none';
         logPanel.innerHTML = `<span class="success-log">${diagnosticLogs}▶️ Tout est prêt ! Lancez la vidéo.</span>`;
+        applyPose(posesData[0]); // Pose initiale à t=0
     }
 }
 
 // ==========================================
-// 5. MOTEUR D'ANIMATION
+// 5. MOTEUR D'ANIMATION & QUATERNIONS
 // ==========================================
 function getMetricPoint(frameData, k) {
     const startIdx = 133 + (k * 3);
-    // Inversion de l'axe Y et Z pour faire correspondre MediaPipe et Three.js
     return new THREE.Vector3(frameData[startIdx], -frameData[startIdx + 1], -frameData[startIdx + 2]);
 }
 
-function pointBoneTo(boneName, startPos, endPos) {
-    const bone = avatarBones[boneName];
+function pointBoneTo(bone, startPos, endPos) {
     if(!bone || !startPos || !endPos) return;
 
     const targetDir = new THREE.Vector3().subVectors(endPos, startPos).normalize();
-    const boneAxis = new THREE.Vector3(0, 1, 0); // Axe par défaut Mixamo
+    const boneAxis = new THREE.Vector3(0, 1, 0); 
     const targetQuat = new THREE.Quaternion().setFromUnitVectors(boneAxis, targetDir);
 
     const parentQuat = new THREE.Quaternion();
@@ -254,16 +257,15 @@ function pointBoneTo(boneName, startPos, endPos) {
 function applyPose(frame) {
     if (!frame) return;
 
-    // Récupération de tous les points pour les debug spheres
-    for(let i=0; i<21; i++) {
+    // Mise à jour des sphères de debug 3D
+    for(let i = 0; i < 21; i++) {
         const pt = getMetricPoint(frame, i);
         if(debugSpheres[i]) {
             debugSpheres[i].position.copy(pt);
-            debugSpheres[i].position.y -= 0; // Ajustement optionnel si MediaPipe flotte
         }
     }
 
-    // Points vitaux pour le squelette
+    // Récupération des points clé MediaPipe
     const nose = getMetricPoint(frame, 0);
     const lShoulder = getMetricPoint(frame, 3);
     const rShoulder = getMetricPoint(frame, 4);
@@ -271,27 +273,37 @@ function applyPose(frame) {
     const rElbow = getMetricPoint(frame, 6);
     const lWrist = getMetricPoint(frame, 7);
     const rWrist = getMetricPoint(frame, 8);
+    const lIndex = getMetricPoint(frame, 9);
+    const rIndex = getMetricPoint(frame, 10);
     const lHip = getMetricPoint(frame, 11);
     const rHip = getMetricPoint(frame, 12);
     const lKnee = getMetricPoint(frame, 13);
     const rKnee = getMetricPoint(frame, 14);
     const lAnkle = getMetricPoint(frame, 15);
     const rAnkle = getMetricPoint(frame, 16);
+    const lFootIndex = getMetricPoint(frame, 19);
+    const rFootIndex = getMetricPoint(frame, 20);
 
     const midHip = new THREE.Vector3().addVectors(lHip, rHip).multiplyScalar(0.5);
     const midShoulder = new THREE.Vector3().addVectors(lShoulder, rShoulder).multiplyScalar(0.5);
 
-    // Si les sphères bougent mais pas le mannequin, c'est cette fonction qui bloque
-    pointBoneTo(BONE_MAPPING.spine, midHip, midShoulder);
-    pointBoneTo(BONE_MAPPING.neck, midShoulder, nose);
-    pointBoneTo(BONE_MAPPING.leftShoulder, lShoulder, lElbow);
-    pointBoneTo(BONE_MAPPING.rightShoulder, rShoulder, rElbow);
-    pointBoneTo(BONE_MAPPING.leftElbow, lElbow, lWrist);
-    pointBoneTo(BONE_MAPPING.rightElbow, rElbow, rWrist);
-    pointBoneTo(BONE_MAPPING.leftHip, lHip, lKnee);
-    pointBoneTo(BONE_MAPPING.rightHip, rHip, rKnee);
-    pointBoneTo(BONE_MAPPING.leftKnee, lKnee, lAnkle);
-    pointBoneTo(BONE_MAPPING.rightKnee, rKnee, rAnkle);
+    // Orientation des os trouvés
+    pointBoneTo(avatarBones.spine, midHip, midShoulder);
+    pointBoneTo(avatarBones.neck, midShoulder, nose);
+
+    pointBoneTo(avatarBones.leftShoulder, lShoulder, lElbow);
+    pointBoneTo(avatarBones.rightShoulder, rShoulder, rElbow);
+    pointBoneTo(avatarBones.leftElbow, lElbow, lWrist);
+    pointBoneTo(avatarBones.rightElbow, rElbow, rWrist);
+    pointBoneTo(avatarBones.leftHand, lWrist, lIndex);
+    pointBoneTo(avatarBones.rightHand, rWrist, rIndex);
+
+    pointBoneTo(avatarBones.leftHip, lHip, lKnee);
+    pointBoneTo(avatarBones.rightHip, rHip, rKnee);
+    pointBoneTo(avatarBones.leftKnee, lKnee, lAnkle);
+    pointBoneTo(avatarBones.rightKnee, rKnee, rAnkle);
+    pointBoneTo(avatarBones.leftAnkle, lAnkle, lFootIndex);
+    pointBoneTo(avatarBones.rightAnkle, rAnkle, rFootIndex);
 }
 
 let lastLogTime = 0;
@@ -304,14 +316,12 @@ function animate() {
         if (frame) {
             applyPose(frame);
 
-            // Mise à jour des logs 4 fois par seconde pour ne pas saturer l'UI
             if(Date.now() - lastLogTime > 250) {
-                const ls = debugSpheres[3].position; // Position de l'épaule gauche MediaPipe
+                const ls = debugSpheres[3].position;
                 logPanel.innerText = `[TÉLÉMÉTRIE EN DIRECT]\n`
                     + `▶ Vidéo Time: ${currentVideoTime.toFixed(3)}s | Frame JSON: ${frame[0].toFixed(3)}s\n\n`
-                    + `--- POINT BRUT MEDIAPIPE (Sphère rouge Épaule Gauche) ---\n`
-                    + `X: ${ls.x.toFixed(3)} | Y: ${ls.y.toFixed(3)} | Z: ${ls.z.toFixed(3)}\n\n`
-                    + `Si les sphères bougent mais que le mannequin est rigide, le problème vient du Scale/Origine du GLB.`;
+                    + `--- POINT BRUT MEDIAPIPE (Épaule Gauche) ---\n`
+                    + `X: ${ls.x.toFixed(3)} | Y: ${ls.y.toFixed(3)} | Z: ${ls.z.toFixed(3)}`;
                 lastLogTime = Date.now();
             }
         }
@@ -323,7 +333,7 @@ function animate() {
 animate();
 
 // ==========================================
-// 6. GESTION DES EVENEMENTS HTML
+// 6. GESTION DES ÉVÉNEMENTS HTML
 // ==========================================
 document.getElementById('toggle-debug').addEventListener('click', (e) => {
     showDebugSpheres = !showDebugSpheres;
