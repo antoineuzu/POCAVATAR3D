@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Prototype 3D Hdance - Quaternions & Xbot</title>
+    <title>Prototype 3D Hdance - Squelette Complet & Synchro</title>
     <style>
         body, html { 
             margin: 0; padding: 0; height: 100%; 
@@ -49,12 +49,12 @@
     <div id="controls-panel">
         <h3 style="margin:0; color:#fff; border-bottom:1px solid #333; padding-bottom:10px;">Réglages 3D</h3>
         <div class="slider-group">
-            <label for="camZ">Zoom (Profondeur) : <span id="valZ">4</span>m</label>
-            <input type="range" id="camZ" min="1" max="20" step="0.5" value="4">
+            <label for="camZ">Zoom (Profondeur) : <span id="valZ">25</span></label>
+            <input type="range" id="camZ" min="2" max="100" step="1" value="25">
         </div>
         <div class="slider-group">
             <label for="targetY">Hauteur (Cadrage Y) : <span id="valY">1.0</span></label>
-            <input type="range" id="targetY" min="-2" max="4" step="0.1" value="1.0">
+            <input type="range" id="targetY" min="-5" max="20" step="0.5" value="1.0">
         </div>
     </div>
     <div id="log-panel">Initialisation du système...</div>
@@ -62,17 +62,27 @@
 
 <script>
 // ==========================================
-// 1. MAPPING EXACT DU SQUELETTE (Xbot)
+// 1. MAPPING COMPLET DU SQUELETTE (Avec syntaxe exacte)
 // ==========================================
 const BONE_MAPPING = {
-    leftShoulder: "mixamorigLeftArm", 
-    rightShoulder: "mixamorigRightArm",
-    leftElbow: "mixamorigLeftForeArm",
-    rightElbow: "mixamorigRightForeArm",
-    leftHip: "mixamorigLeftUpLeg",
-    rightHip: "mixamorigRightUpLeg",
-    leftKnee: "mixamorigLeftLeg",
-    rightKnee: "mixamorigRightLeg"
+    hips: "mixamorig:Hips_01",
+    spine: "mixamorig:Spine_02",
+    neck: "mixamorig:Neck_05",
+    head: "mixamorig:Head_06",
+    
+    leftShoulder: "mixamorig:LeftArm_09", 
+    rightShoulder: "mixamorig:RightArm_033",
+    leftElbow: "mixamorig:LeftForeArm_010",
+    rightElbow: "mixamorig:RightForeArm_034",
+    leftHand: "mixamorig:LeftHand_011",
+    rightHand: "mixamorig:RightHand_035",
+
+    leftHip: "mixamorig:LeftUpLeg_055",
+    rightHip: "mixamorig:RightUpLeg_060",
+    leftKnee: "mixamorig:LeftLeg_056",
+    rightKnee: "mixamorig:RightLeg_061",
+    leftAnkle: "mixamorig:LeftFoot_057",
+    rightAnkle: "mixamorig:RightFoot_062"
 };
 
 // ==========================================
@@ -81,11 +91,10 @@ const BONE_MAPPING = {
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 
-// Caméra rapprochée (Z=4) pour un modèle à échelle humaine
-let currentCamZ = 4; 
+let currentCamZ = 25; 
 let currentTargetY = 1.0;
 
-const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
+const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
 camera.position.set(0, currentTargetY, currentCamZ);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -102,18 +111,41 @@ const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
 dirLight.position.set(2, 5, 5);
 scene.add(dirLight);
 
-// Ajout d'une grille au sol pour mieux repérer l'espace 3D
+// Grille au sol
 const gridHelper = new THREE.GridHelper(10, 10, 0x00ffcc, 0x333333);
-gridHelper.position.y = -1; // Le sol est à Y=-1
+gridHelper.position.y = -1;
 scene.add(gridHelper);
 
 // ==========================================
-// 3. CHARGEMENT DU GLB (Depuis GitHub via jsDelivr)
+// 3. VARIABLES ET SYNCHRONISATION
 // ==========================================
 let avatarBones = {};
-const loader = new THREE.GLTFLoader();
+let posesData = [];
+let isModelLoaded = false;
+let isJsonLoaded = false;
 
-loader.load('./Xbot.glb', (gltf) => {
+const logPanel = document.getElementById('log-panel');
+const player = Stream(document.getElementById('stream-player'));
+
+let currentVideoTime = 0; 
+player.addEventListener('timeupdate', (event) => {
+    currentVideoTime = event.currentTime;
+});
+
+// Vérifie si tout est prêt pour appliquer la Frame 0
+function checkReadyAndInit() {
+    if (isModelLoaded && isJsonLoaded && posesData.length > 0) {
+        document.getElementById('loading').style.display = 'none';
+        logPanel.innerText = `✅ Modèle 3D et JSON chargés avec succès.\n▶️ Synchronisation initiale terminée. Lancez la vidéo.`;
+        applyPose(posesData[0]); // Application de la première frame
+    }
+}
+
+// ==========================================
+// 4. CHARGEMENT DU GLB 
+// ==========================================
+const loader = new THREE.GLTFLoader();
+loader.load('./free_female_mannequin_base_mesh_2.glb', (gltf) => {
     const model = gltf.scene;
     
     const shinyMaterial = new THREE.MeshStandardMaterial({
@@ -125,53 +157,41 @@ loader.load('./Xbot.glb', (gltf) => {
         if (child.isBone) avatarBones[child.name] = child;
     });
 
-    model.position.y = -1; // Les pieds touchent la grille
+    model.position.y = -1; 
     scene.add(model);
-    document.getElementById('loading').style.display = 'none';
-}, undefined, (error) => {
-    console.error(error);
-    document.getElementById('log-panel').innerText = "❌ Erreur de chargement du Xbot.glb";
+    isModelLoaded = true;
+    checkReadyAndInit();
 });
 
 // ==========================================
-// 4. LECTURE JSON & LECTEUR CLOUDFLARE
+// 5. LECTURE JSON
 // ==========================================
-let posesData = [];
-const logPanel = document.getElementById('log-panel');
-const player = Stream(document.getElementById('stream-player'));
-
-logPanel.innerText = "⏳ Téléchargement des données IA...";
-
 fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
-    .then(res => {
-        if(!res.ok) throw new Error("Fichier introuvable sur le serveur Vercel");
-        return res.text();
-    })
+    .then(res => res.text())
     .then(text => {
         const lines = text.trim().split('\n');
         for(let i = 1; i < lines.length; i++) {
             posesData.push(JSON.parse(lines[i]));
         }
-        logPanel.innerText = `✅ JSON chargé avec succès (${posesData.length} frames) !\n▶️ Lancez la vidéo pour démarrer l'animation.`;
+        isJsonLoaded = true;
+        checkReadyAndInit();
     })
-    .catch(err => {
-        logPanel.innerText = `❌ ERREUR JSON : ${err.message}`;
-    });
+    .catch(err => console.error("Erreur JSON:", err));
 
+// ==========================================
+// 6. MOTEUR D'ANIMATION ET QUATERNIONS
+// ==========================================
 function getMetricPoint(frameData, k) {
     const startIdx = 133 + (k * 3);
     return new THREE.Vector3(frameData[startIdx], -frameData[startIdx + 1], -frameData[startIdx + 2]);
 }
 
-// ==========================================
-// 5. MOTEUR QUATERNIONS (Cinématique)
-// ==========================================
-const targetWorldPos = new THREE.Vector3();
-function pointBoneTo(bone, startPos, endPos) {
+function pointBoneTo(boneName, startPos, endPos) {
+    const bone = avatarBones[boneName];
     if(!bone || !startPos || !endPos) return;
 
     const targetDir = new THREE.Vector3().subVectors(endPos, startPos).normalize();
-    const boneAxis = new THREE.Vector3(0, 1, 0); // L'axe Y est l'axe des os de Xbot
+    const boneAxis = new THREE.Vector3(0, 1, 0); // L'axe Y est l'axe des os dans Mixamo
     const targetQuat = new THREE.Quaternion().setFromUnitVectors(boneAxis, targetDir);
 
     const parentQuat = new THREE.Quaternion();
@@ -184,46 +204,69 @@ function pointBoneTo(bone, startPos, endPos) {
     bone.quaternion.copy(localQuat);
 }
 
+// Fonction centrale pour appliquer une pose (utilisée pour Init + Update)
+function applyPose(frame) {
+    if (!frame) return;
+
+    // Extraction des 21 points MediaPipe de ton JSON
+    const nose = getMetricPoint(frame, 0);
+    const lShoulder = getMetricPoint(frame, 3);
+    const rShoulder = getMetricPoint(frame, 4);
+    const lElbow = getMetricPoint(frame, 5);
+    const rElbow = getMetricPoint(frame, 6);
+    const lWrist = getMetricPoint(frame, 7);
+    const rWrist = getMetricPoint(frame, 8);
+    const lIndex = getMetricPoint(frame, 9);
+    const rIndex = getMetricPoint(frame, 10);
+    const lHip = getMetricPoint(frame, 11);
+    const rHip = getMetricPoint(frame, 12);
+    const lKnee = getMetricPoint(frame, 13);
+    const rKnee = getMetricPoint(frame, 14);
+    const lAnkle = getMetricPoint(frame, 15);
+    const rAnkle = getMetricPoint(frame, 16);
+    const lFootIndex = getMetricPoint(frame, 19);
+    const rFootIndex = getMetricPoint(frame, 20);
+
+    // Points virtuels (Milieu des hanches et milieu des épaules)
+    const midHip = new THREE.Vector3().addVectors(lHip, rHip).multiplyScalar(0.5);
+    const midShoulder = new THREE.Vector3().addVectors(lShoulder, rShoulder).multiplyScalar(0.5);
+
+    // Tronc & Tête
+    pointBoneTo(BONE_MAPPING.spine, midHip, midShoulder);
+    pointBoneTo(BONE_MAPPING.neck, midShoulder, nose);
+
+    // Bras & Mains
+    pointBoneTo(BONE_MAPPING.leftShoulder, lShoulder, lElbow);
+    pointBoneTo(BONE_MAPPING.rightShoulder, rShoulder, rElbow);
+    pointBoneTo(BONE_MAPPING.leftElbow, lElbow, lWrist);
+    pointBoneTo(BONE_MAPPING.rightElbow, rElbow, rWrist);
+    pointBoneTo(BONE_MAPPING.leftHand, lWrist, lIndex);
+    pointBoneTo(BONE_MAPPING.rightHand, rWrist, rIndex);
+
+    // Jambes & Pieds
+    pointBoneTo(BONE_MAPPING.leftHip, lHip, lKnee);
+    pointBoneTo(BONE_MAPPING.rightHip, rHip, rKnee);
+    pointBoneTo(BONE_MAPPING.leftKnee, lKnee, lAnkle);
+    pointBoneTo(BONE_MAPPING.rightKnee, rKnee, rAnkle);
+    pointBoneTo(BONE_MAPPING.leftAnkle, lAnkle, lFootIndex);
+    pointBoneTo(BONE_MAPPING.rightAnkle, rAnkle, rFootIndex);
+}
+
+// Boucle principale
 function animate() {
     requestAnimationFrame(animate);
 
-    if (posesData.length > 0 && player) {
-        // Lecture directe et synchrone du temps vidéo
-        const currentTime = player.currentTime;
+    if (posesData.length > 0 && currentVideoTime > 0) {
+        // Recherche de la frame la plus proche du temps de la vidéo
+        const frame = posesData.find(p => Math.abs(p[0] - currentVideoTime) < 0.04) || posesData[Math.floor(currentVideoTime * 25)];
         
-        if (typeof currentTime === 'number' && currentTime > 0) {
-            const frame = posesData.find(p => Math.abs(p[0] - currentTime) < 0.04) || posesData[Math.floor(currentTime * 25)];
-            
-            if (frame) {
-                const lShoulder = getMetricPoint(frame, 3);
-                const lElbow = getMetricPoint(frame, 5);
-                const lWrist = getMetricPoint(frame, 7);
+        if (frame) {
+            applyPose(frame);
 
-                const rShoulder = getMetricPoint(frame, 4);
-                const rElbow = getMetricPoint(frame, 6);
-                const rWrist = getMetricPoint(frame, 8);
-
-                const lHip = getMetricPoint(frame, 11);
-                const lKnee = getMetricPoint(frame, 13);
-                const lAnkle = getMetricPoint(frame, 15);
-
-                const rHip = getMetricPoint(frame, 12);
-                const rKnee = getMetricPoint(frame, 14);
-                const rAnkle = getMetricPoint(frame, 16);
-
-                pointBoneTo(avatarBones[BONE_MAPPING.leftShoulder], lShoulder, lElbow);
-                pointBoneTo(avatarBones[BONE_MAPPING.rightShoulder], rShoulder, rElbow);
-                pointBoneTo(avatarBones[BONE_MAPPING.leftElbow], lElbow, lWrist);
-                pointBoneTo(avatarBones[BONE_MAPPING.rightElbow], rElbow, rWrist);
-                pointBoneTo(avatarBones[BONE_MAPPING.leftHip], lHip, lKnee);
-                pointBoneTo(avatarBones[BONE_MAPPING.rightHip], rHip, rKnee);
-                pointBoneTo(avatarBones[BONE_MAPPING.leftKnee], lKnee, lAnkle);
-                pointBoneTo(avatarBones[BONE_MAPPING.rightKnee], rKnee, rAnkle);
-
-                logPanel.innerText = `[EN DIRECT] Temps Vidéo : ${currentTime.toFixed(3)}s | Frame JSON : ${frame[0].toFixed(2)}s\n\n`
-                    + `--- DONNÉES BIOMÉCANIQUES (Mètres) ---\n`
-                    + `Épaule G  : X ${lShoulder.x.toFixed(3)} | Y ${lShoulder.y.toFixed(3)} | Z ${lShoulder.z.toFixed(3)}\n`
-                    + `Épaule D  : X ${rShoulder.x.toFixed(3)} | Y ${rShoulder.y.toFixed(3)} | Z ${rShoulder.z.toFixed(3)}`;
+            // Télémétrie en direct
+            if(Math.floor(currentVideoTime * 100) % 10 === 0) { // Alléger l'affichage HTML
+                logPanel.innerText = `[EN DIRECT] Temps Vidéo : ${currentVideoTime.toFixed(3)}s | Frame JSON : ${frame[0].toFixed(2)}s\n`
+                    + `L'animation prend en compte : Colonne, Tête, Épaules, Coudes, Poignets, Hanches, Genoux, Chevilles.`;
             }
         }
     }
@@ -234,7 +277,7 @@ function animate() {
 animate();
 
 // ==========================================
-// 6. GESTION DES EVENEMENTS
+// 7. GESTION DES EVENEMENTS HTML
 // ==========================================
 document.getElementById('camZ').addEventListener('input', (e) => {
     currentCamZ = parseFloat(e.target.value);
