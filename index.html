@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Prototype 3D Hdance - Fixed Alignment & Shading</title>
+    <title>Prototype 3D Hdance - Full Telemetry & Motion Fix</title>
     <style>
         body, html { 
             margin: 0; padding: 0; height: 100%; 
@@ -18,16 +18,18 @@
         #canvas-container { flex: 1; position: relative; background: #1a1a1a; }
         #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #00ffcc; font-weight: bold; font-size: 1.2rem; pointer-events: none; text-align: center; }
 
-        #bottom-half { height: 250px; display: flex; background: #0a0a0a; }
-        #controls-panel { width: 300px; padding: 20px; border-right: 2px solid #333; display: flex; flex-direction: column; gap: 15px; }
-        .slider-group { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: #00ffcc; }
+        #bottom-half { height: 280px; display: flex; background: #0a0a0a; }
+        #controls-panel { width: 280px; padding: 15px; border-right: 2px solid #333; display: flex; flex-direction: column; gap: 12px; }
+        .slider-group { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #00ffcc; }
         input[type=range] { cursor: pointer; width: 100%; }
         
-        .btn-action { background: #00ffcc; color: #000; padding: 10px; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; }
+        .btn-action { background: #00ffcc; color: #000; padding: 8px; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; font-size: 12px; }
         .btn-action:hover { background: #00cca3; }
 
-        #log-panel { flex: 1; padding: 15px; overflow-y: auto; font-family: monospace; font-size: 13px; color: #0f0; white-space: pre-wrap;}
-        .success-log { color: #00ffcc; }
+        #log-panel { flex: 1; padding: 12px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 11px; color: #00ff66; white-space: pre-wrap; line-height: 1.3; background: #050505; }
+        .log-section { color: #00ffcc; font-weight: bold; margin-top: 5px; text-decoration: underline; }
+        .log-warn { color: #ffcc00; }
+        .log-err { color: #ff4444; }
     </style>
     
     <!-- Librairies Three.js -->
@@ -51,8 +53,9 @@
 
 <div id="bottom-half">
     <div id="controls-panel">
-        <h3 style="margin:0; color:#fff; border-bottom:1px solid #333; padding-bottom:10px;">Réglages & Test</h3>
+        <h3 style="margin:0; color:#fff; border-bottom:1px solid #333; padding-bottom:5px; font-size:14px;">Réglages & Test</h3>
         <button id="btn-force-play" class="btn-action">▶ Forcer la lecture 3D</button>
+        <button id="toggle-debug" class="btn-action" style="background:#444; color:#fff;">Masquer Sphères IA</button>
         <div class="slider-group">
             <label for="camZ">Zoom (Profondeur) : <span id="valZ">3.0</span>m</label>
             <input type="range" id="camZ" min="0.5" max="10" step="0.1" value="3.0">
@@ -62,12 +65,12 @@
             <input type="range" id="targetY" min="-3" max="5" step="0.1" value="0.0">
         </div>
     </div>
-    <div id="log-panel">Initialisation du système...</div>
+    <div id="log-panel">Initialisation du diagnostic système...</div>
 </div>
 
 <script>
 // ==========================================
-// 1. RECHERCHE FLEXIBLE DES OS
+// 1. MAPPING FLEXIBLE DES OS
 // ==========================================
 const BONE_KEYWORDS = {
     hips: "Hips",
@@ -88,14 +91,22 @@ const BONE_KEYWORDS = {
     rightAnkle: "RightFoot"
 };
 
+const MEDIAPIPE_NAMES = [
+    "0: Nez", "1: Oeil G", "2: Oeil D", "3: Épaule G", "4: Épaule D",
+    "5: Coude G", "6: Coude D", "7: Poignet G", "8: Poignet D", "9: Index G",
+    "10: Index D", "11: Hanche G", "12: Hanche D", "13: Genou G", "14: Genou D",
+    "15: Cheville G", "16: Cheville D", "17: Talon G", "18: Talon D", "19: Pied G", "20: Pied D"
+];
+
 // ==========================================
-// 2. SCÈNE 3D & ÉCLAIRAGE STUDIO (Anti-Rendu Blanc)
+// 2. SCÈNE 3D ET RENDERER
 // ==========================================
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 
 let currentCamZ = 3.0; 
 let currentTargetY = 0.0;
+let showDebugSpheres = true;
 
 const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
 camera.position.set(0, currentTargetY, currentCamZ);
@@ -110,9 +121,8 @@ const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.target.set(0, currentTargetY, 0);
 controls.update();
 
-// Éclairage 3-points pour faire ressortir les formes anatomiques
+// Éclairage Studio Bleu Satiné
 scene.add(new THREE.AmbientLight(0x404050, 1.2));
-
 const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
 keyLight.position.set(3, 5, 4);
 scene.add(keyLight);
@@ -125,7 +135,7 @@ const gridHelper = new THREE.GridHelper(10, 10, 0x00ffcc, 0x333333);
 gridHelper.position.y = -1;
 scene.add(gridHelper);
 
-// Sphères de debug MediaPipe
+// Sphères de debug
 const debugSpheres = [];
 const sphereGeo = new THREE.SphereGeometry(0.025, 16, 16);
 const materialLeft = new THREE.MeshBasicMaterial({ color: 0xff0000 });
@@ -143,19 +153,23 @@ for(let i = 0; i < 21; i++) {
 }
 
 // ==========================================
-// 3. CHARGEMENT DE 1.GLB & MATÉRIAU SATINÉ
+// 3. STATUTS MODULES & CHARGEMENT GLB
 // ==========================================
 let avatarModel = null;
 let avatarBones = {};
-let skeletonRef = null;
+let skinnedMeshes = [];
 let isModelLoaded = false;
 let isJsonLoaded = false;
 
 const logPanel = document.getElementById('log-panel');
 const loadingDetails = document.getElementById('loading-details');
-const loader = new THREE.GLTFLoader();
 
-loadingDetails.innerText = "Chargement de 1.glb...";
+let moduleLogs = "=== CHARGEMENT ET CONNEXION DES MODULES ===\n";
+moduleLogs += "✔ THREE.js : Version r128 chargée\n";
+moduleLogs += "✔ OrbitControls : Initialisés\n";
+
+const loader = new THREE.GLTFLoader();
+loadingDetails.innerText = "Chargement du modèle 1.glb...";
 
 loader.load('./1.glb', (gltf) => {
     avatarModel = gltf.scene;
@@ -164,7 +178,7 @@ loader.load('./1.glb', (gltf) => {
         gltf.animations = [];
     }
 
-    // Matériau Bleu Satiné avec du relief
+    // Matériau Bleu Satiné
     const customMaterial = new THREE.MeshStandardMaterial({
         color: 0x0088cc,
         roughness: 0.3,
@@ -175,19 +189,25 @@ loader.load('./1.glb', (gltf) => {
     avatarModel.traverse((child) => {
         if (child.isMesh) {
             child.material = customMaterial;
-            if (child.skeleton) skeletonRef = child.skeleton;
+            if (child.isSkinnedMesh) skinnedMeshes.push(child);
         }
         if (child.name) allNodes.push(child);
     });
 
+    moduleLogs += `✔ GLTFLoader : 1.glb chargé (${allNodes.length} nœuds détectés)\n`;
+    moduleLogs += `✔ SkinnedMesh : ${skinnedMeshes.length} maillage(s) articulé(s) détecté(s)\n`;
+
+    let mappedCount = 0;
     for (const [logicalName, keyword] of Object.entries(BONE_KEYWORDS)) {
         const matchedNode = allNodes.find(node => node.name.toLowerCase().includes(keyword.toLowerCase()));
         if (matchedNode) {
             avatarBones[logicalName] = matchedNode;
+            mappedCount++;
         }
     }
 
-    // Normalisation de l'échelle à 1.8 mètre
+    moduleLogs += `✔ Squelette Armature : ${mappedCount}/16 os connectés au dictionnaire\n`;
+
     const bbox = new THREE.Box3().setFromObject(avatarModel);
     const size = bbox.getSize(new THREE.Vector3());
     if (size.y > 0) {
@@ -200,10 +220,13 @@ loader.load('./1.glb', (gltf) => {
     
     isModelLoaded = true;
     checkReadyAndInit();
+}, undefined, (err) => {
+    moduleLogs += `❌ GLTFLoader ERREUR : Impossible de charger 1.glb (${err.message})\n`;
+    logPanel.innerText = moduleLogs;
 });
 
 // ==========================================
-// 4. LECTURE JSON & SYNCHRO
+// 4. LECTURE JSON & SDK CLOUDFLARE
 // ==========================================
 let posesData = [];
 let currentVideoTime = 0; 
@@ -220,8 +243,6 @@ player.addEventListener('timeupdate', (e) => {
     }
 });
 
-loadingDetails.innerText = "Téléchargement du JSON...";
-
 fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
     .then(res => res.text())
     .then(text => {
@@ -229,53 +250,69 @@ fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
         for(let i = 1; i < lines.length; i++) {
             posesData.push(JSON.parse(lines[i]));
         }
+        moduleLogs += `✔ JSON MediaPipe : Chargé (${posesData.length} frames enregistrées)\n`;
         isJsonLoaded = true;
         checkReadyAndInit();
+    })
+    .catch(err => {
+        moduleLogs += `❌ JSON ERREUR : ${err.message}\n`;
+        logPanel.innerText = moduleLogs;
     });
 
 function checkReadyAndInit() {
     if (isModelLoaded && isJsonLoaded) {
         document.getElementById('loading').style.display = 'none';
-        logPanel.innerHTML = `<span class="success-log">✅ Modèle et JSON prêts.\n▶ Lancez la vidéo.</span>`;
+        logPanel.innerText = moduleLogs + "\n▶ SYSTÈME PRÊT : Calibrage de la Frame 0 terminé.";
         applyPose(posesData[0]);
     }
 }
 
 // ==========================================
-// 5. CINÉMATIQUE VECTORIELLE ET ALIGNEMENT
+// 5. MOTEUR CINÉMATIQUE & CALCUL ROTATIONS
 // ==========================================
 function getMetricPoint(frameData, k) {
     const startIdx = 133 + (k * 3);
     return new THREE.Vector3(frameData[startIdx], -frameData[startIdx + 1], -frameData[startIdx + 2]);
 }
 
-// Orienter les os en local sans arracher le maillage de son centre
-function rotateBoneToTarget(bone, startPos, endPos, defaultAxis = new THREE.Vector3(0, 1, 0)) {
-    if (!bone || !startPos || !endPos) return;
+// Orientation d'os sécurisée avec calcul d'angle Euler pour la télémétrie
+const boneRotationsLog = {};
+
+function orientBone(boneKey, boneObj, startPos, endPos, defaultAxis) {
+    if (!boneObj || !startPos || !endPos) return;
 
     const targetDir = new THREE.Vector3().subVectors(endPos, startPos).normalize();
     const targetQuat = new THREE.Quaternion().setFromUnitVectors(defaultAxis, targetDir);
 
-    const parentQuat = new THREE.Quaternion();
-    if (bone.parent) {
-        bone.parent.updateWorldMatrix(true, false); 
-        bone.parent.getWorldQuaternion(parentQuat);
+    if (boneObj.parent) {
+        boneObj.parent.updateWorldMatrix(true, false);
+        const parentQuat = new THREE.Quaternion();
+        boneObj.parent.getWorldQuaternion(parentQuat);
+        targetQuat.premultiply(parentQuat.invert());
     }
-    
-    const localQuat = parentQuat.invert().multiply(targetQuat);
-    bone.quaternion.copy(localQuat);
-    bone.updateMatrixWorld(true);
+
+    boneObj.quaternion.copy(targetQuat);
+    boneObj.updateMatrixWorld(true);
+
+    // Extraction des angles Euler (X,Y,Z en degrés) pour l'affichage exhaustif
+    const euler = new THREE.Euler().setFromQuaternion(targetQuat, 'XYZ');
+    boneRotationsLog[boneKey] = {
+        x: (euler.x * 180 / Math.PI).toFixed(1),
+        y: (euler.y * 180 / Math.PI).toFixed(1),
+        z: (euler.z * 180 / Math.PI).toFixed(1)
+    };
 }
 
 function applyPose(frame) {
     if (!frame) return;
 
-    // 1. Placement exact des sphères de contrôle
+    // 1. Placement des 21 sphères MediaPipe
     for(let i = 0; i < 21; i++) {
         const pt = getMetricPoint(frame, i);
         if(debugSpheres[i]) debugSpheres[i].position.copy(pt);
     }
 
+    // 2. Extractions des 21 points
     const nose = getMetricPoint(frame, 0);
     const lShoulder = getMetricPoint(frame, 3);
     const rShoulder = getMetricPoint(frame, 4);
@@ -293,36 +330,40 @@ function applyPose(frame) {
     const midHip = new THREE.Vector3().addVectors(lHip, rHip).multiplyScalar(0.5);
     const midShoulder = new THREE.Vector3().addVectors(lShoulder, rShoulder).multiplyScalar(0.5);
 
-    // 2. Ancrer le modèle globalement au bassin MediaPipe
+    // 3. Translation de l'avatar au centre du bassin
     if(avatarModel) {
         avatarModel.position.copy(midHip);
     }
 
-    // 3. Axes standards de repos
+    // 4. Orientations des os
     const axisY = new THREE.Vector3(0, 1, 0);
     const axisLeftArm = new THREE.Vector3(1, 0, 0);
     const axisRightArm = new THREE.Vector3(-1, 0, 0);
 
-    // 4. Orientations locales
-    rotateBoneToTarget(avatarBones.spine, midHip, midShoulder, axisY);
-    rotateBoneToTarget(avatarBones.neck, midShoulder, nose, axisY);
+    orientBone('Spine', avatarBones.spine, midHip, midShoulder, axisY);
+    orientBone('Neck', avatarBones.neck, midShoulder, nose, axisY);
 
-    rotateBoneToTarget(avatarBones.leftShoulder, lShoulder, lElbow, axisLeftArm);
-    rotateBoneToTarget(avatarBones.rightShoulder, rShoulder, rElbow, axisRightArm);
-    rotateBoneToTarget(avatarBones.leftElbow, lElbow, lWrist, axisLeftArm);
-    rotateBoneToTarget(avatarBones.rightElbow, rElbow, rWrist, axisRightArm);
+    orientBone('LeftShoulder', avatarBones.leftShoulder, lShoulder, lElbow, axisLeftArm);
+    orientBone('RightShoulder', avatarBones.rightShoulder, rShoulder, rElbow, axisRightArm);
+    orientBone('LeftElbow', avatarBones.leftElbow, lElbow, lWrist, axisLeftArm);
+    orientBone('RightElbow', avatarBones.rightElbow, rElbow, rWrist, axisRightArm);
 
-    rotateBoneToTarget(avatarBones.leftHip, lHip, lKnee, axisY);
-    rotateBoneToTarget(avatarBones.rightHip, rHip, rKnee, axisY);
-    rotateBoneToTarget(avatarBones.leftKnee, lKnee, lAnkle, axisY);
-    rotateBoneToTarget(avatarBones.rightKnee, rKnee, rAnkle, axisY);
+    orientBone('LeftHip', avatarBones.leftHip, lHip, lKnee, axisY);
+    orientBone('RightHip', avatarBones.rightHip, rHip, rKnee, axisY);
+    orientBone('LeftKnee', avatarBones.leftKnee, lKnee, lAnkle, axisY);
+    orientBone('RightKnee', avatarBones.rightKnee, rKnee, rAnkle, axisY);
 
-    if (skeletonRef) {
-        skeletonRef.update();
-    }
+    // 5. Forcer la mise à jour de la peau SkinnedMesh
+    skinnedMeshes.forEach(mesh => {
+        if (mesh.skeleton) mesh.skeleton.update();
+    });
 }
 
+// ==========================================
+// 6. ANIMATION & TÉLÉMÉTRIE EXHAUSTIVE EN DIRECT
+// ==========================================
 let lastLogTime = 0;
+
 function animate() {
     requestAnimationFrame(animate);
 
@@ -336,10 +377,24 @@ function animate() {
         if (frame) {
             applyPose(frame);
 
+            // Rafraîchissement des logs 4x par seconde
             if(Date.now() - lastLogTime > 250) {
-                logPanel.innerText = `[TÉLÉMÉTRIE EN DIRECT]\n`
-                    + `▶ Temps : ${currentVideoTime.toFixed(3)}s | Frame : ${frame[0].toFixed(3)}s\n`
-                    + `Pose alignée sur les sphères MediaPipe.`;
+                let txt = moduleLogs + "\n";
+                txt += "=== TÉLÉMÉTRIE DE SQUELETTE EN DIRECT ===\n";
+                txt += `⏱ Temps Vidéo: ${currentVideoTime.toFixed(3)}s | Frame JSON: ${frame[0].toFixed(3)}s | Mode: ${isManualPlaying ? "Horloge Interne" : "Synchro Stream"}\n\n`;
+
+                txt += "--- VERIFICATION DES MOVEMENTS / ROTATIONS DES OS (Degrés X, Y, Z) ---\n";
+                for(const [bName, rot] of Object.entries(boneRotationsLog)) {
+                    txt += `• ${bName.padEnd(14)} : Pitch=${rot.x.padStart(6)}° | Yaw=${rot.y.padStart(6)}° | Roll=${rot.z.padStart(6)}°\n`;
+                }
+
+                txt += "\n--- COORDONNÉES EN DIRECT DES 21 POINTS MEDIAPIPE (Mètres) ---\n";
+                for(let i = 0; i < 21; i++) {
+                    const pt = getMetricPoint(frame, i);
+                    txt += `[Point ${i.toString().padStart(2)}] ${MEDIAPIPE_NAMES[i].padEnd(15)} : X=${pt.x.toFixed(3)}m | Y=${pt.y.toFixed(3)}m | Z=${pt.z.toFixed(3)}m\n`;
+                }
+
+                logPanel.innerText = txt;
                 lastLogTime = Date.now();
             }
         }
@@ -351,12 +406,18 @@ function animate() {
 animate();
 
 // ==========================================
-// 6. ÉVÉNEMENTS HTML
+// 7. ÉVÉNEMENTS HTML
 // ==========================================
 document.getElementById('btn-force-play').addEventListener('click', () => {
     isManualPlaying = !isManualPlaying;
     if(isManualPlaying) manualStartTime = Date.now() - (currentVideoTime * 1000);
     document.getElementById('btn-force-play').innerText = isManualPlaying ? "⏸ Pause 3D" : "▶ Forcer la lecture 3D";
+});
+
+document.getElementById('toggle-debug').addEventListener('click', (e) => {
+    showDebugSpheres = !showDebugSpheres;
+    debugSpheres.forEach(s => s.visible = showDebugSpheres);
+    e.target.innerText = showDebugSpheres ? "Masquer Sphères IA" : "Afficher Sphères IA";
 });
 
 document.getElementById('camZ').addEventListener('input', (e) => {
