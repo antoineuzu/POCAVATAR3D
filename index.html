@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Prototype 3D Hdance - Direct Skeleton Mesh</title>
+    <title>Prototype 3D Hdance - Live Motion (1.glb)</title>
     <style>
         body, html { 
             margin: 0; padding: 0; height: 100%; 
@@ -33,6 +33,7 @@
     <!-- Librairies Three.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
     
     <!-- SDK Cloudflare Stream -->
     <script src="https://embed.cloudflarestream.com/embed/sdk.latest.js"></script>
@@ -44,7 +45,7 @@
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
     <div id="canvas-container">
-        <div id="loading">Chargement IA & Squelette 3D...</div>
+        <div id="loading">Chargement IA & 3D (1.glb)...<br><span id="loading-details" style="font-size: 0.8rem; color: #aaa;"></span></div>
     </div>
 </div>
 
@@ -66,7 +67,29 @@
 
 <script>
 // ==========================================
-// 1. INITIALISATION THREE.JS & SCÈNE
+// 1. RECHERCHE FLEXIBLE DES OS
+// ==========================================
+const BONE_KEYWORDS = {
+    hips: "Hips",
+    spine: "Spine",
+    neck: "Neck",
+    head: "Head",
+    leftShoulder: "LeftArm", 
+    rightShoulder: "RightArm",
+    leftElbow: "LeftForeArm",
+    rightElbow: "RightForeArm",
+    leftHand: "LeftHand",
+    rightHand: "RightHand",
+    leftHip: "LeftUpLeg",
+    rightHip: "RightUpLeg",
+    leftKnee: "LeftLeg",
+    rightKnee: "RightLeg",
+    leftAnkle: "LeftFoot",
+    rightAnkle: "RightFoot"
+};
+
+// ==========================================
+// 2. INITIALISATION THREE.JS
 // ==========================================
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
@@ -86,52 +109,96 @@ controls.target.set(0, currentTargetY, 0);
 controls.update();
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+dirLight.position.set(2, 5, 5);
+scene.add(dirLight);
+
 const gridHelper = new THREE.GridHelper(10, 10, 0x00ffcc, 0x333333);
 gridHelper.position.y = -1;
 scene.add(gridHelper);
 
-// ==========================================
-// 2. CRÉATION DU SQUELETTE DYNAMIQUE (Sphères + Bâtonnets)
-// ==========================================
-const jointSpheres = [];
-const sphereGeo = new THREE.SphereGeometry(0.04, 16, 16);
-const matJoint = new THREE.MeshStandardMaterial({ color: 0x00ffcc, metalness: 0.5, roughness: 0.1 });
+// Sphères de debug pour repérer les points MediaPipe
+const debugSpheres = [];
+const sphereGeo = new THREE.SphereGeometry(0.03, 16, 16);
+const materialLeft = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+const materialRight = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+const materialCenter = new THREE.MeshBasicMaterial({ color: 0xffffff });
 
-// Création des 21 articulations
 for(let i = 0; i < 21; i++) {
-    const sphere = new THREE.Mesh(sphereGeo, matJoint);
+    let mat = materialCenter;
+    if(i % 2 !== 0) mat = materialLeft;
+    if(i > 0 && i % 2 === 0) mat = materialRight;
+    
+    const sphere = new THREE.Mesh(sphereGeo, mat);
     scene.add(sphere);
-    jointSpheres.push(sphere);
+    debugSpheres.push(sphere);
 }
 
-// Connections d'os entre les joints (Paires d'index MediaPipe)
-const BONE_CONNECTIONS = [
-    [0, 1], [1, 2], [2, 3], [3, 7], // Tête/Buste
-    [3, 4], [4, 6], [6, 8],          // Bras Droit
-    [3, 5], [5, 7],                  // Bras Gauche (Epaule->Coude->Poignet)
-    [3, 11], [3, 12],                // Buste vers Hanches
-    [11, 12],                        // Bassin
-    [11, 13], [13, 15], [15, 19],    // Jambe Gauche
-    [12, 14], [14, 16], [16, 20]     // Jambe Droite
-];
+// ==========================================
+// 3. CHARGEMENT DU FICHIER 1.GLB
+// ==========================================
+let avatarModel = null;
+let avatarBones = {};
+let skeletonRef = null;
+let isModelLoaded = false;
+let isJsonLoaded = false;
 
-// Création des lignes 3D (os)
-const boneLinesGeometry = new THREE.BufferGeometry();
-const bonePositions = new Float32Array(BONE_CONNECTIONS.length * 6);
-boneLinesGeometry.setAttribute('position', new THREE.BufferAttribute(bonePositions, 3));
-const boneMaterial = new THREE.LineBasicMaterial({ color: 0x00aaff, linewidth: 4 });
-const boneLines = new THREE.LineSegments(boneLinesGeometry, boneMaterial);
-scene.add(boneLines);
+const logPanel = document.getElementById('log-panel');
+const loadingDetails = document.getElementById('loading-details');
+const loader = new THREE.GLTFLoader();
+
+loadingDetails.innerText = "Chargement de 1.glb...";
+
+loader.load('./1.glb', (gltf) => {
+    avatarModel = gltf.scene;
+    
+    // Annulation des animations pré-enregistrées
+    if (gltf.animations && gltf.animations.length) {
+        gltf.animations = [];
+    }
+
+    const allNodes = [];
+    avatarModel.traverse((child) => {
+        if (child.isMesh && child.skeleton) {
+            skeletonRef = child.skeleton;
+        }
+        if (child.name) allNodes.push(child);
+    });
+
+    // Association des os
+    for (const [logicalName, keyword] of Object.entries(BONE_KEYWORDS)) {
+        const matchedNode = allNodes.find(node => node.name.toLowerCase().includes(keyword.toLowerCase()));
+        if (matchedNode) {
+            avatarBones[logicalName] = matchedNode;
+        }
+    }
+
+    // Auto-scaling pour adapter le modèle à la scène
+    const bbox = new THREE.Box3().setFromObject(avatarModel);
+    const size = bbox.getSize(new THREE.Vector3());
+    if (size.y > 0) {
+        const scaleFactor = 1.8 / size.y;
+        avatarModel.scale.set(scaleFactor, scaleFactor, scaleFactor);
+    }
+    
+    avatarModel.position.set(0, 0, 0);
+    scene.add(avatarModel);
+    
+    isModelLoaded = true;
+    checkReadyAndInit();
+}, undefined, (err) => {
+    loadingDetails.innerText = "❌ Impossible de charger 1.glb. Vérifiez sa présence à la racine.";
+    console.error("Erreur 1.glb:", err);
+});
 
 // ==========================================
-// 3. LECTURE DU JSON ET SYNCHRONISATION
+// 4. LECTURE JSON & SYNCHRONISATION
 // ==========================================
 let posesData = [];
 let currentVideoTime = 0; 
 let isManualPlaying = false;
 let manualStartTime = 0;
 
-const logPanel = document.getElementById('log-panel');
 const player = Stream(document.getElementById('stream-player'));
 
 player.addEventListener('play', () => { isManualPlaying = true; manualStartTime = Date.now() - (currentVideoTime * 1000); });
@@ -142,6 +209,8 @@ player.addEventListener('timeupdate', (e) => {
     }
 });
 
+loadingDetails.innerText = "Téléchargement du JSON...";
+
 fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
     .then(res => res.text())
     .then(text => {
@@ -149,48 +218,80 @@ fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
         for(let i = 1; i < lines.length; i++) {
             posesData.push(JSON.parse(lines[i]));
         }
-        document.getElementById('loading').style.display = 'none';
-        logPanel.innerHTML = `<span class="success-log">✅ Squelette 3D dynamique prêt (${posesData.length} frames).\n▶ Lancez la vidéo pour voir le mouvement.</span>`;
-        applyPose(posesData[0]);
+        isJsonLoaded = true;
+        checkReadyAndInit();
     });
 
+function checkReadyAndInit() {
+    if (isModelLoaded && isJsonLoaded) {
+        document.getElementById('loading').style.display = 'none';
+        logPanel.innerHTML = `<span class="success-log">✅ Modèle 1.glb et JSON chargés (${posesData.length} frames).\n▶ Lancez la vidéo ou cliquez sur "Forcer la lecture 3D".</span>`;
+        applyPose(posesData[0]);
+    }
+}
+
+// ==========================================
+// 5. ANIMATION ET ORIENTATION
+// ==========================================
 function getMetricPoint(frameData, k) {
     const startIdx = 133 + (k * 3);
     return new THREE.Vector3(frameData[startIdx], -frameData[startIdx + 1], -frameData[startIdx + 2]);
 }
 
+function alignBoneToTarget(bone, startPos, endPos) {
+    if (!bone || !startPos || !endPos) return;
+
+    const dir = new THREE.Vector3().subVectors(endPos, startPos).normalize();
+    const targetWorldPos = new THREE.Vector3().addVectors(bone.getWorldPosition(new THREE.Vector3()), dir);
+    bone.lookAt(targetWorldPos);
+    bone.updateMatrixWorld(true);
+}
+
 function applyPose(frame) {
     if (!frame) return;
 
-    const positions = boneLines.geometry.attributes.position.array;
-
-    // 1. Positionner les sphères d'articulation
     for(let i = 0; i < 21; i++) {
         const pt = getMetricPoint(frame, i);
-        if(jointSpheres[i]) {
-            jointSpheres[i].position.copy(pt);
-        }
+        if(debugSpheres[i]) debugSpheres[i].position.copy(pt);
     }
 
-    // 2. Mettre à jour les os reliés (LineSegments)
-    let ptr = 0;
-    for(let i = 0; i < BONE_CONNECTIONS.length; i++) {
-        const idxA = BONE_CONNECTIONS[i][0];
-        const idxB = BONE_CONNECTIONS[i][1];
+    const nose = getMetricPoint(frame, 0);
+    const lShoulder = getMetricPoint(frame, 3);
+    const rShoulder = getMetricPoint(frame, 4);
+    const lElbow = getMetricPoint(frame, 5);
+    const rElbow = getMetricPoint(frame, 6);
+    const lWrist = getMetricPoint(frame, 7);
+    const rWrist = getMetricPoint(frame, 8);
+    const lHip = getMetricPoint(frame, 11);
+    const rHip = getMetricPoint(frame, 12);
+    const lKnee = getMetricPoint(frame, 13);
+    const rKnee = getMetricPoint(frame, 14);
+    const lAnkle = getMetricPoint(frame, 15);
+    const rAnkle = getMetricPoint(frame, 16);
 
-        const pA = jointSpheres[idxA].position;
-        const pB = jointSpheres[idxB].position;
+    const midHip = new THREE.Vector3().addVectors(lHip, rHip).multiplyScalar(0.5);
+    const midShoulder = new THREE.Vector3().addVectors(lShoulder, rShoulder).multiplyScalar(0.5);
 
-        positions[ptr++] = pA.x;
-        positions[ptr++] = pA.y;
-        positions[ptr++] = pA.z;
-
-        positions[ptr++] = pB.x;
-        positions[ptr++] = pB.y;
-        positions[ptr++] = pB.z;
+    if(avatarModel) {
+        avatarModel.position.copy(midHip);
     }
 
-    boneLines.geometry.attributes.position.needsUpdate = true;
+    alignBoneToTarget(avatarBones.spine, midHip, midShoulder);
+    alignBoneToTarget(avatarBones.neck, midShoulder, nose);
+
+    alignBoneToTarget(avatarBones.leftShoulder, lShoulder, lElbow);
+    alignBoneToTarget(avatarBones.rightShoulder, rShoulder, rElbow);
+    alignBoneToTarget(avatarBones.leftElbow, lElbow, lWrist);
+    alignBoneToTarget(avatarBones.rightElbow, rElbow, rWrist);
+
+    alignBoneToTarget(avatarBones.leftHip, lHip, lKnee);
+    alignBoneToTarget(avatarBones.rightHip, rHip, rKnee);
+    alignBoneToTarget(avatarBones.leftKnee, lKnee, lAnkle);
+    alignBoneToTarget(avatarBones.rightKnee, rKnee, rAnkle);
+
+    if (skeletonRef) {
+        skeletonRef.update();
+    }
 }
 
 let lastLogTime = 0;
@@ -209,8 +310,8 @@ function animate() {
 
             if(Date.now() - lastLogTime > 250) {
                 logPanel.innerText = `[TÉLÉMÉTRIE EN DIRECT]\n`
-                    + `▶ Temps Calculé : ${currentVideoTime.toFixed(3)}s | Frame JSON : ${frame[0].toFixed(3)}s\n`
-                    + `Squelette 3D animé en direct : Actif`;
+                    + `▶ Temps : ${currentVideoTime.toFixed(3)}s | Frame : ${frame[0].toFixed(3)}s\n`
+                    + `Modèle 1.glb synchronisé.`;
                 lastLogTime = Date.now();
             }
         }
@@ -222,7 +323,7 @@ function animate() {
 animate();
 
 // ==========================================
-// 4. ÉVÉNEMENTS HTML
+// 6. ÉVÉNEMENTS HTML
 // ==========================================
 document.getElementById('btn-force-play').addEventListener('click', () => {
     isManualPlaying = !isManualPlaying;
