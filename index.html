@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Prototype 3D Hdance - Forced Bone Matrix Update</title>
+    <title>Prototype 3D Hdance - Direct Bone Transform</title>
     <style>
         body, html { 
             margin: 0; padding: 0; height: 100%; 
@@ -135,11 +135,11 @@ for(let i = 0; i < 21; i++) {
 }
 
 // ==========================================
-// 3. CHARGEMENT DU GLB & EXTRACTION DES OS
+// 3. CHARGEMENT ET DÉSACTIVATION DES ANIMATIONS INTERNES
 // ==========================================
 let avatarModel = null;
 let avatarBones = {};
-let skinnedMeshes = [];
+let skeletonRef = null;
 let isModelLoaded = false;
 let isJsonLoaded = false;
 
@@ -152,26 +152,36 @@ loadingDetails.innerText = "Chargement du modèle 3D...";
 loader.load('./free_female_mannequin_base_mesh_2.glb', (gltf) => {
     avatarModel = gltf.scene;
     
+    // Annuler les animations intégrées au fichier GLB
+    if (gltf.animations && gltf.animations.length) {
+        gltf.animations = [];
+    }
+
     const shinyMaterial = new THREE.MeshStandardMaterial({
         color: 0x00aaff, metalness: 0.6, roughness: 0.2
     });
 
-    const allNodes = [];
     avatarModel.traverse((child) => {
         if (child.isMesh) {
             child.material = shinyMaterial;
-            if(child.isSkinnedMesh) skinnedMeshes.push(child);
+            if (child.skeleton) {
+                skeletonRef = child.skeleton;
+            }
         }
-        if (child.name) allNodes.push(child);
     });
 
-    for (const [logicalName, keyword] of Object.entries(BONE_KEYWORDS)) {
-        const matchedNode = allNodes.find(node => node.name.includes(keyword));
-        if (matchedNode) {
-            avatarBones[logicalName] = matchedNode;
-        }
+    // Extraction directe depuis la hiérarchie du squelette
+    if (skeletonRef && skeletonRef.bones) {
+        skeletonRef.bones.forEach(bone => {
+            for (const [logicalName, keyword] of Object.entries(BONE_KEYWORDS)) {
+                if (bone.name.includes(keyword) && !avatarBones[logicalName]) {
+                    avatarBones[logicalName] = bone;
+                }
+            }
+        });
     }
 
+    // Définir la taille
     avatarModel.scale.set(0.01, 0.01, 0.01);
     avatarModel.position.set(0, 0, 0);
     
@@ -214,46 +224,43 @@ fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
 function checkReadyAndInit() {
     if (isModelLoaded && isJsonLoaded) {
         document.getElementById('loading').style.display = 'none';
-        logPanel.innerHTML = `<span class="success-log">✅ Fichiers chargés (${posesData.length} frames).\n▶ L'animation 3D s'exécute en direct !</span>`;
+        logPanel.innerHTML = `<span class="success-log">✅ Fichiers chargés (${posesData.length} frames).\n▶ L'animation 3D est connectée au squelette.</span>`;
         applyPose(posesData[0]);
     }
 }
 
 // ==========================================
-// 5. MOTEUR DE ROTATION AVEC FORCE UPDATE
+// 5. ORIENTATION DIRECTE DES BONES
 // ==========================================
 function getMetricPoint(frameData, k) {
     const startIdx = 133 + (k * 3);
     return new THREE.Vector3(frameData[startIdx], -frameData[startIdx + 1], -frameData[startIdx + 2]);
 }
 
-function pointBoneTo(bone, startPos, endPos, defaultAxis = new THREE.Vector3(0, 1, 0)) {
-    if(!bone || !startPos || !endPos) return;
+function alignBoneToTarget(bone, startPos, endPos) {
+    if (!bone || !startPos || !endPos) return;
 
-    const targetDir = new THREE.Vector3().subVectors(endPos, startPos).normalize();
-    const targetQuat = new THREE.Quaternion().setFromUnitVectors(defaultAxis, targetDir);
-
-    const parentQuat = new THREE.Quaternion();
-    if (bone.parent) {
-        bone.parent.updateWorldMatrix(true, false); 
-        bone.parent.getWorldQuaternion(parentQuat);
-    }
+    // Calcul de la direction du membre dans l'espace monde
+    const dir = new THREE.Vector3().subVectors(endPos, startPos).normalize();
     
-    const localQuat = parentQuat.invert().multiply(targetQuat);
-    bone.quaternion.copy(localQuat);
+    // Application de la rotation sur l'os
+    const targetWorldPos = new THREE.Vector3().addVectors(bone.getWorldPosition(new THREE.Vector3()), dir);
+    bone.lookAt(targetWorldPos);
     
-    // 🔥 INSTRUCTION CRUCIALE : Forcer le moteur à appliquer la rotation sur le squelette 3D
+    // Forcer la mise à jour immédiate
     bone.updateMatrixWorld(true);
 }
 
 function applyPose(frame) {
     if (!frame) return;
 
+    // 1. Mise à jour des sphères de debug
     for(let i = 0; i < 21; i++) {
         const pt = getMetricPoint(frame, i);
         if(debugSpheres[i]) debugSpheres[i].position.copy(pt);
     }
 
+    // 2. Extractions des points clé MediaPipe
     const nose = getMetricPoint(frame, 0);
     const lShoulder = getMetricPoint(frame, 3);
     const rShoulder = getMetricPoint(frame, 4);
@@ -271,32 +278,29 @@ function applyPose(frame) {
     const midHip = new THREE.Vector3().addVectors(lHip, rHip).multiplyScalar(0.5);
     const midShoulder = new THREE.Vector3().addVectors(lShoulder, rShoulder).multiplyScalar(0.5);
 
-    if(avatarModel && avatarBones.hips) {
+    // 3. Déplacer l'origine du modèle sur les hanches
+    if(avatarModel) {
         avatarModel.position.copy(midHip);
     }
 
-    const axisY = new THREE.Vector3(0, 1, 0);
-    const axisLeftArm = new THREE.Vector3(1, 0, 0);
-    const axisRightArm = new THREE.Vector3(-1, 0, 0);
+    // 4. Orienter chaque membre vers son point cible
+    alignBoneToTarget(avatarBones.spine, midHip, midShoulder);
+    alignBoneToTarget(avatarBones.neck, midShoulder, nose);
 
-    // Orientations forcées
-    pointBoneTo(avatarBones.spine, midHip, midShoulder, axisY);
-    pointBoneTo(avatarBones.neck, midShoulder, nose, axisY);
+    alignBoneToTarget(avatarBones.leftShoulder, lShoulder, lElbow);
+    alignBoneToTarget(avatarBones.rightShoulder, rShoulder, rElbow);
+    alignBoneToTarget(avatarBones.leftElbow, lElbow, lWrist);
+    alignBoneToTarget(avatarBones.rightElbow, rElbow, rWrist);
 
-    pointBoneTo(avatarBones.leftShoulder, lShoulder, lElbow, axisLeftArm);
-    pointBoneTo(avatarBones.rightShoulder, rShoulder, rElbow, axisRightArm);
-    pointBoneTo(avatarBones.leftElbow, lElbow, lWrist, axisLeftArm);
-    pointBoneTo(avatarBones.rightElbow, rElbow, rWrist, axisRightArm);
+    alignBoneToTarget(avatarBones.leftHip, lHip, lKnee);
+    alignBoneToTarget(avatarBones.rightHip, rHip, rKnee);
+    alignBoneToTarget(avatarBones.leftKnee, lKnee, lAnkle);
+    alignBoneToTarget(avatarBones.rightKnee, rKnee, rAnkle);
 
-    pointBoneTo(avatarBones.leftHip, lHip, lKnee, axisY);
-    pointBoneTo(avatarBones.rightHip, rHip, rKnee, axisY);
-    pointBoneTo(avatarBones.leftKnee, lKnee, lAnkle, axisY);
-    pointBoneTo(avatarBones.rightKnee, rKnee, rAnkle, axisY);
-    
-    // Forcer la mise à jour de la peau (SkinnedMesh)
-    skinnedMeshes.forEach(mesh => {
-        if (mesh.skeleton) mesh.skeleton.update();
-    });
+    // 5. Forcer le rafraîchissement global du squelette
+    if (skeletonRef) {
+        skeletonRef.update();
+    }
 }
 
 let lastLogTime = 0;
@@ -316,7 +320,7 @@ function animate() {
             if(Date.now() - lastLogTime > 250) {
                 logPanel.innerText = `[TÉLÉMÉTRIE EN DIRECT]\n`
                     + `▶ Temps Calculé : ${currentVideoTime.toFixed(3)}s | Frame JSON : ${frame[0].toFixed(3)}s\n`
-                    + `Mises à jour force des os : Actives`;
+                    + `Liaison Squelette Directe : Active`;
                 lastLogTime = Date.now();
             }
         }
