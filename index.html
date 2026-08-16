@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Prototype 3D Hdance - Quaternions</title>
+    <title>Prototype 3D Hdance - Quaternions & Xbot</title>
     <style>
         body, html { 
             margin: 0; padding: 0; height: 100%; 
@@ -11,6 +11,7 @@
             overflow: hidden; display: flex; flex-direction: column;
         }
         
+        /* HAUT : Split Screen Vidéo / 3D */
         #top-half { 
             display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0;
         }
@@ -28,6 +29,7 @@
             color: #00ffcc; font-weight: bold; font-size: 1.2rem; pointer-events: none; 
         }
 
+        /* BAS : Contrôles & Logs */
         #bottom-half { 
             height: 250px; display: flex; background: #0a0a0a;
         }
@@ -44,13 +46,17 @@
         }
     </style>
     
+    <!-- Librairies Three.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    
+    <!-- SDK Cloudflare Stream -->
     <script src="https://embed.cloudflarestream.com/embed/sdk.latest.js"></script>
 </head>
 <body>
 
+<!-- MOITIÉ HAUTE : VIDÉO (GAUCHE) / 3D (DROITE) -->
 <div id="top-half">
     <div id="video-container">
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
@@ -60,13 +66,14 @@
     </div>
 </div>
 
+<!-- MOITIÉ BASSE : CONTRÔLES / ASCENSEUR DE LOGS -->
 <div id="bottom-half">
     <div id="controls-panel">
         <h3 style="margin:0; color:#fff; border-bottom:1px solid #333; padding-bottom:10px;">Réglages 3D</h3>
         <div class="slider-group">
-            <label for="camZ">Zoom (Profondeur) : <span id="valZ">25</span></label>
-            <!-- Limite augmentée à 100 pour gérer les avatars géants -->
-            <input type="range" id="camZ" min="2" max="100" step="1" value="25">
+            <label for="camZ">Zoom (Profondeur) : <span id="valZ">25</span>m</label>
+            <!-- Zoom max passé à 500 -->
+            <input type="range" id="camZ" min="2" max="500" step="1" value="25">
         </div>
         <div class="slider-group">
             <label for="targetY">Hauteur (Cadrage Y) : <span id="valY">1.0</span></label>
@@ -78,17 +85,17 @@
 
 <script>
 // ==========================================
-// 1. MAPPING EXACT DU SQUELETTE
+// 1. MAPPING EXACT DU SQUELETTE (Modèle Xbot)
 // ==========================================
 const BONE_MAPPING = {
-    leftShoulder: "mixamorigLeftArm_09", 
-    rightShoulder: "mixamorigRightArm_033",
-    leftElbow: "mixamorigLeftForeArm_010",
-    rightElbow: "mixamorigRightForeArm_034",
-    leftHip: "mixamorigLeftUpLeg_055",
-    rightHip: "mixamorigRightUpLeg_060",
-    leftKnee: "mixamorigLeftLeg_056",
-    rightKnee: "mixamorigRightLeg_061"
+    leftShoulder: "mixamorigLeftArm", 
+    rightShoulder: "mixamorigRightArm",
+    leftElbow: "mixamorigLeftForeArm",
+    rightElbow: "mixamorigRightForeArm",
+    leftHip: "mixamorigLeftUpLeg",
+    rightHip: "mixamorigRightUpLeg",
+    leftKnee: "mixamorigLeftLeg",
+    rightKnee: "mixamorigRightLeg"
 };
 
 // ==========================================
@@ -97,9 +104,10 @@ const BONE_MAPPING = {
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 
-let currentCamZ = 25; // Recul initial augmenté
+let currentCamZ = 25; 
 let currentTargetY = 1.0;
 
+// Caméra avec une vue de profondeur allant jusqu'à 1000 pour englober le zoom à 500
 const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
 camera.position.set(0, currentTargetY, currentCamZ);
 
@@ -118,13 +126,14 @@ dirLight.position.set(2, 5, 5);
 scene.add(dirLight);
 
 // ==========================================
-// 3. CHARGEMENT DU GLB 
+// 3. CHARGEMENT DU GLB (Depuis le CDN)
 // ==========================================
 let avatarBones = {};
 let extractedBonesList = [];
 const loader = new THREE.GLTFLoader();
 
-loader.load('xbot.glb', (gltf) => {
+// Chargement direct du Xbot officiel pour éviter les fichiers locaux corrompus
+loader.load('https://unpkg.com/three@0.128.0/examples/models/gltf/Xbot.glb', (gltf) => {
     const model = gltf.scene;
     
     const shinyMaterial = new THREE.MeshStandardMaterial({
@@ -148,7 +157,7 @@ loader.load('xbot.glb', (gltf) => {
 // 4. LECTURE JSON & LECTEUR CLOUDFLARE
 // ==========================================
 let posesData = [];
-let currentVideoTime = 0; // Sécurisation du timer
+let currentVideoTime = 0; 
 const player = Stream(document.getElementById('stream-player'));
 
 // Écoute du temps Cloudflare en temps réel
@@ -171,7 +180,7 @@ function getMetricPoint(frameData, k) {
 }
 
 // ==========================================
-// 🔥 5. VRAI MOTEUR QUATERNIONS (Cinématique)
+// 🔥 5. MOTEUR QUATERNIONS (Cinématique)
 // ==========================================
 function pointBoneTo(bone, startPos, endPos) {
     if(!bone || !startPos || !endPos) return;
@@ -188,7 +197,6 @@ function pointBoneTo(bone, startPos, endPos) {
     // 4. Calcul de la rotation locale (On annule la rotation du parent)
     const parentQuat = new THREE.Quaternion();
     if (bone.parent) {
-        // Mise à jour vitale pour s'assurer que le parent (ex: épaule) a fini de tourner avant de bouger l'enfant (ex: coude)
         bone.parent.updateWorldMatrix(true, false); 
         bone.parent.getWorldQuaternion(parentQuat);
     }
@@ -196,7 +204,7 @@ function pointBoneTo(bone, startPos, endPos) {
     // Formule mathématique : Quaternion Local = Inverse(Parent Global) * Cible
     const localQuat = parentQuat.invert().multiply(targetQuat);
     
-    // 5. Application propre !
+    // 5. Application propre sans torsion
     bone.quaternion.copy(localQuat);
 }
 
@@ -247,7 +255,7 @@ function animate() {
                 + `Épaule G  : X ${lShoulder.x.toFixed(3)} | Y ${lShoulder.y.toFixed(3)} | Z ${lShoulder.z.toFixed(3)}\n`
                 + `Épaule D  : X ${rShoulder.x.toFixed(3)} | Y ${rShoulder.y.toFixed(3)} | Z ${rShoulder.z.toFixed(3)}\n\n`
                 + `--- LISTE DES OS DU GLB ---\n`
-                + extractedBonesList.join(', ');
+                + extractedBonesList.join('\n');
         }
     }
 
