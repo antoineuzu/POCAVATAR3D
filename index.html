@@ -132,8 +132,8 @@ let avatarBones = {};
 let extractedBonesList = [];
 const loader = new THREE.GLTFLoader();
 
-// Chargement direct du Xbot officiel pour éviter les fichiers locaux corrompus
-loader.load('https://unpkg.com/three@0.128.0/examples/models/gltf/Xbot.glb', (gltf) => {
+// Chargement direct du Xbot depuis le dépôt GitHub via jsDelivr
+loader.load('https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/models/gltf/Xbot.glb', (gltf) => {
     const model = gltf.scene;
     
     const shinyMaterial = new THREE.MeshStandardMaterial({
