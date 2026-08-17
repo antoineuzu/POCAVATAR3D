@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hdance - Fluid Hips & Cyber Studio</title>
+    <title>Hdance - Belly Dance Stabilized</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; background-color: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; overflow: hidden; }
         #top-half { display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0; }
         #video-container { flex: 1; background: #000; border-right: 2px solid #333; }
         iframe { width: 100%; height: 100%; border: none; }
-        #canvas-container { flex: 1; position: relative; background: #000; }
+        #canvas-container { flex: 1; position: relative; background: #050505; }
         #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #00ffff; font-weight: bold; text-align: center; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 8px; border: 1px solid #00ffff; z-index: 10;}
         #bottom-half { height: 200px; display: flex; background: #0a0a0a; border-top: 2px solid #333; z-index: 5; }
         #controls-panel { width: 300px; padding: 15px; border-right: 2px solid #333; display: flex; flex-direction: column; gap: 10px; }
@@ -30,14 +30,14 @@
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
     <div id="canvas-container">
-        <div id="loading">Libération des articulations du bassin...</div>
+        <div id="loading">Stabilisation du buste et filtrage des sautillements...</div>
     </div>
 </div>
 
 <div id="bottom-half">
     <div id="controls-panel">
         <h3 style="margin:0; color:#fff;">⚙️ Contrôles</h3>
-        <p style="font-size: 11px; color: #aaa; margin: 0;">Déhanché 3D actif. Déplacements stabilisés pour caméra fixe.</p>
+        <p style="font-size: 11px; color: #aaa; margin: 0;">Caméra de face, dos droit, déhanché fluide.</p>
         <button id="btn-debug-skeleton" class="btn-action" style="background:#ffaa00; color:#000; margin-top: 10px;">🦴 Afficher Lignes Squelette</button>
         <button id="btn-toggle-mesh" class="btn-action" style="background:#444; color:#fff;">👻 Masquer la peau 3D</button>
     </div>
@@ -59,68 +59,62 @@ const BONE_DICTIONARY = {
 };
 
 // ==========================================
-// 2. SCÈNE 3D & CYBER STUDIO
+// 2. SCÈNE 3D & CYBER STUDIO (Vue de face)
 // ==========================================
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 
+// 🔴 CAMÉRA DE FACE (Comme sur la photo)
 const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
-camera.position.set(4, 2.5, 5); 
+camera.position.set(0, 1.3, 4.5); // Face au modèle, hauteur buste, reculée pour voir les pieds
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(container.clientWidth, container.clientHeight);
-renderer.setClearColor(0x000000); 
+renderer.setClearColor(0x050505); 
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 container.appendChild(renderer.domElement);
 
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 1.0, 0);
+controls.target.set(0, 0.9, 0);
 
 function buildFuturisticStudio() {
     const gridSize = 20;
     const gridDivisions = 80;
-    const gridColor = 0x00ffff; 
+    const gridColor = 0x0088ff; // Bleu plus doux
 
     const floorGrid = new THREE.GridHelper(gridSize, gridDivisions, gridColor, gridColor);
     floorGrid.material.transparent = true;
-    floorGrid.material.opacity = 0.3;
+    floorGrid.material.opacity = 0.2;
     scene.add(floorGrid);
 
+    // Murs retirés pour dégager la vue de face, on garde juste une ligne d'horizon
     const wallGrid1 = new THREE.GridHelper(gridSize, gridDivisions, gridColor, gridColor);
     wallGrid1.rotation.x = Math.PI / 2;
-    wallGrid1.position.z = -gridSize / 2;
+    wallGrid1.position.z = -4;
     wallGrid1.position.y = gridSize / 2;
     wallGrid1.material.transparent = true;
-    wallGrid1.material.opacity = 0.2;
+    wallGrid1.material.opacity = 0.05; // Très discret
     scene.add(wallGrid1);
 
-    const wallGrid2 = new THREE.GridHelper(gridSize, gridDivisions, gridColor, gridColor);
-    wallGrid2.rotation.z = Math.PI / 2;
-    wallGrid2.position.x = -gridSize / 2;
-    wallGrid2.position.y = gridSize / 2;
-    wallGrid2.material.transparent = true;
-    wallGrid2.material.opacity = 0.2;
-    scene.add(wallGrid2);
-
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+    // 🔴 ÉCLAIRAGE ADOUCI
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4); 
     scene.add(ambientLight);
 
-    const frontLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    const frontLight = new THREE.DirectionalLight(0xffffff, 0.6); 
     frontLight.position.set(0, 2, 5);
     scene.add(frontLight);
 
-    const blueLight = new THREE.PointLight(0x00ffff, 4.0, 20);
-    blueLight.position.set(3, 3, 3);
-    blueLight.castShadow = true;
+    const blueLight = new THREE.PointLight(0x00ffff, 1.2, 20); 
+    blueLight.position.set(3, 3, 2);
     scene.add(blueLight);
 
-    const pinkLight = new THREE.PointLight(0xff00ff, 3.5, 20);
+    const pinkLight = new THREE.PointLight(0xff00ff, 1.0, 20); 
     pinkLight.position.set(-3, 2, 2);
     scene.add(pinkLight);
 
-    const mustardLight = new THREE.PointLight(0xffdb58, 4.0, 20);
-    mustardLight.position.set(0, 4, -4);
+    const mustardLight = new THREE.PointLight(0xffdb58, 1.5, 20); 
+    mustardLight.position.set(0, 3, -3);
     scene.add(mustardLight);
 }
 buildFuturisticStudio();
@@ -143,7 +137,7 @@ let basePelvisQuat = null;
 
 let baseGroundRefY2D = null;
 let baseScreenX0 = null;
-let baseMidHip3D_Z0 = null; // Référence 3D native pour la profondeur
+let baseMidHip3D_Z0 = null;
 let baseModelPos = null;
 
 const SMOOTH_FACTOR = 0.25; 
@@ -161,8 +155,9 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
             node.castShadow = true;     
             node.receiveShadow = true;
             if (node.material) {
-                node.material.roughness = 0.5;
-                node.material.metalness = 0.1;
+                // Matériaux plus mats pour éviter la sur-brillance
+                node.material.roughness = 0.7;
+                node.material.metalness = 0.0;
             }
         }
         if (node.isSkinnedMesh) skinnedMeshes.push(node);
@@ -243,18 +238,13 @@ function getLowestY2D(frame) {
     return maxY;
 }
 
-// 🔴 LIBÉRATION DU BASSIN : Autorise toutes les rotations (Sway, Drop, Tilt)
-function computeRootBasis(hL, hR, midHip, midShoulder) {
-    const x = new THREE.Vector3().subVectors(hR, hL).normalize(); // Axe Droite-Gauche (Inclinaison latérale)
-    const y = new THREE.Vector3().subVectors(midShoulder, midHip).normalize(); // Axe Bas-Haut (Dos)
-    
-    // Adoucissement du penchement avant/arrière pour compenser le biais de la caméra
-    y.z *= 0.5; 
-    y.normalize();
-    
-    const z = new THREE.Vector3().crossVectors(x, y).normalize(); // Axe Avant-Arrière
-    x.crossVectors(y, z).normalize(); // Orthogonalisation finale
-    
+// 🔴 BASSIN DROIT : Autorise le déhanché latéral, empêche le penchement avant
+function computeRootBasis(hL, hR) {
+    const x = new THREE.Vector3().subVectors(hR, hL).normalize(); 
+    // Force la verticale parfaite pour le corps (anti-penchement)
+    const yUp = new THREE.Vector3(0, 1, 0); 
+    const z = new THREE.Vector3().crossVectors(x, yUp).normalize(); 
+    const y = new THREE.Vector3().crossVectors(z, x).normalize(); 
     const mat = new THREE.Matrix4().makeBasis(x, y, z);
     return new THREE.Quaternion().setFromRotationMatrix(mat);
 }
@@ -266,7 +256,7 @@ function extractRestDirections() {
     const midHip = new THREE.Vector3().addVectors(hL, hR).multiplyScalar(0.5);
     const midShoulder = new THREE.Vector3().addVectors(sL, sR).multiplyScalar(0.5);
 
-    basePelvisQuat = computeRootBasis(hL, hR, midHip, midShoulder);
+    basePelvisQuat = computeRootBasis(hL, hR);
 
     const frame0 = posesData[0];
     baseGroundRefY2D = getLowestY2D(frame0);
@@ -293,7 +283,7 @@ function extractRestDirections() {
     restDirs.rightKnee = new THREE.Vector3().subVectors(getWPos(avatarBones.rightFoot), getWPos(avatarBones.rightKnee)).normalize();
 
     document.getElementById('loading').style.display = 'none';
-    logPanel.innerText = `✅ Modèle prêt. Déhanché (Hip Sway) 100% actif.`;
+    logPanel.innerText = `✅ Buste redressé. Filtre anti-sautillement activé.`;
 }
 
 function checkAutoStart() {
@@ -332,7 +322,7 @@ player.addEventListener('timeupdate', () => {
 });
 
 // ==========================================
-// 7. CINÉMATIQUE & GESTION DU DÉPLACEMENT
+// 7. CINÉMATIQUE 
 // ==========================================
 function applyInheritedKinematics(bone, restDir, targetDir, rootDeltaQuat) {
     if (!bone || !restDir || !targetDir || !rootDeltaQuat) return;
@@ -384,7 +374,6 @@ function alignFootToGround(footBone, heelMP, toeMP, rootDeltaQuat) {
 function applyPose(frame) {
     if (!frame || !avatarModel || !basePelvisQuat || baseGroundRefY2D === null) return;
 
-    // 🔴 1. DÉPLACEMENT (X = Écran, Z = Profondeur 3D MediaPipe, Y = Pieds)
     const currentLowestY2D = getLowestY2D(frame);
     
     const sHL = getScreenPoint(frame, 11);
@@ -399,18 +388,20 @@ function applyPose(frame) {
     const deltaZ = currentMidHip3D_Z - baseMidHip3D_Z0;
     const deltaY = baseGroundRefY2D - currentLowestY2D;
 
-    const SCALE_X = 2.5;  
-    const SCALE_Y = 1.5; 
-    const SCALE_Z = 1.0;  
-
     const targetPos = baseModelPos.clone();
-    targetPos.x += deltaX * SCALE_X;
-    targetPos.y += Math.max(0, deltaY * SCALE_Y); 
-    targetPos.z += deltaZ * SCALE_Z;
+    targetPos.x += deltaX * 2.5; 
+    targetPos.z += deltaZ * 1.0; 
+    
+    // 🔴 ANTI-SAUTILLEMENT : Zone morte de 2.5 cm. Ignore les petits levers de talons.
+    if (deltaY > 0.025) {
+        targetPos.y += (deltaY - 0.025) * 1.5;
+    } else {
+        targetPos.y = 0; // Reste solidement cloué au sol pour les mouvements de hanches
+    }
 
     avatarModel.position.lerp(targetPos, SMOOTH_FACTOR);
 
-    // 🔴 2. ROTATIONS SQUELETTE & BASSIN LIBRE
+    // 🔴 2. ROTATIONS SQUELETTE
     const nose = getPoint(frame, 0);
     const sL = getPoint(frame, 3), sR = getPoint(frame, 4);
     const eL = getPoint(frame, 5), eR = getPoint(frame, 6);
@@ -425,8 +416,7 @@ function applyPose(frame) {
     let deltaPelvis = new THREE.Quaternion();
 
     if (avatarBones.hips) {
-        // Le bassin utilise maintenant les hanches et les épaules pour incliner librement sur tous les axes
-        const currentPelvisQuat = computeRootBasis(hL, hR, midHip, midShoulder);
+        const currentPelvisQuat = computeRootBasis(hL, hR);
         deltaPelvis = currentPelvisQuat.clone().multiply(basePelvisQuat.clone().invert());
         
         const targetHipsGlobal = deltaPelvis.clone().multiply(avatarBones.hips.userData.initialWorldQuat);
@@ -440,9 +430,14 @@ function applyPose(frame) {
         avatarBones.hips.updateMatrixWorld(true);
     }
 
-    // Dos libre
-    const spineDir = new THREE.Vector3().subVectors(midShoulder, midHip).normalize();
-    const neckDir = new THREE.Vector3().subVectors(nose, midShoulder).normalize();
+    // 🔴 DOS DROIT : On force la profondeur (Z) proche de 0 pour ne pas se pencher
+    const spineDir = new THREE.Vector3().subVectors(midShoulder, midHip);
+    spineDir.z *= 0.1; 
+    spineDir.normalize();
+
+    const neckDir = new THREE.Vector3().subVectors(nose, midShoulder);
+    neckDir.z *= 0.1;
+    neckDir.normalize();
 
     const lShoulderDir = new THREE.Vector3().subVectors(eL, sL).normalize();
     const lElbowDir = new THREE.Vector3().subVectors(wL, eL).normalize();
