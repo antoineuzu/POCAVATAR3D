@@ -3,21 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hdance - True Foot Grounding & Sync</title>
+    <title>Hdance - Cyber Studio & Full Mocap</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; background-color: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; overflow: hidden; }
         #top-half { display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0; }
         #video-container { flex: 1; background: #000; border-right: 2px solid #333; }
         iframe { width: 100%; height: 100%; border: none; }
-        #canvas-container { flex: 1; position: relative; background: #1a1a1a; }
-        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #00ffcc; font-weight: bold; text-align: center; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 8px; border: 1px solid #00ffcc; z-index: 10;}
+        #canvas-container { flex: 1; position: relative; background: #000; } /* Fond noir absolu */
+        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #00ffff; font-weight: bold; text-align: center; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 8px; border: 1px solid #00ffff; z-index: 10;}
         #bottom-half { height: 200px; display: flex; background: #0a0a0a; border-top: 2px solid #333; z-index: 5; }
         #controls-panel { width: 300px; padding: 15px; border-right: 2px solid #333; display: flex; flex-direction: column; gap: 10px; }
-        .btn-action { background: #00ffcc; color: #000; padding: 10px; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; pointer-events: auto; }
-        .btn-action:hover { background: #00cca3; }
+        .btn-action { background: #00ffff; color: #000; padding: 10px; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; pointer-events: auto; }
+        .btn-action:hover { background: #00cccc; }
         #log-panel { flex: 1; padding: 15px; overflow-y: auto; font-family: monospace; font-size: 13px; color: #0f0; white-space: pre-wrap; line-height: 1.4; background: #050505;}
     </style>
     
+    <!-- Scripts Three.js r128 standardisés pour notre moteur -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
@@ -30,14 +31,14 @@
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
     <div id="canvas-container">
-        <div id="loading">Réparation des axes des chevilles...</div>
+        <div id="loading">Initialisation Cyber Studio & Mocap MediaPipe...</div>
     </div>
 </div>
 
 <div id="bottom-half">
     <div id="controls-panel">
         <h3 style="margin:0; color:#fff;">⚙️ Contrôles</h3>
-        <p style="font-size: 11px; color: #aaa; margin: 0;">Pieds posés parfaitement à plat. Orientation préservée.</p>
+        <p style="font-size: 11px; color: #aaa; margin: 0;">Avatar MetaHuman + Éclairage Studio + Grille Futuriste.</p>
         <button id="btn-debug-skeleton" class="btn-action" style="background:#ffaa00; color:#000; margin-top: 10px;">🦴 Afficher Lignes Squelette</button>
         <button id="btn-toggle-mesh" class="btn-action" style="background:#444; color:#fff;">👻 Masquer la peau 3D</button>
     </div>
@@ -59,17 +60,18 @@ const BONE_DICTIONARY = {
 };
 
 // ==========================================
-// 2. SCÈNE 3D & STUDIO
+// 2. SCÈNE 3D & CYBER STUDIO
 // ==========================================
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 
+// Caméra positionnée dans un angle pour la perspective
 const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
-camera.position.set(0, 1.4, 5.0);
+camera.position.set(4, 2.5, 5); 
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(container.clientWidth, container.clientHeight);
-renderer.setClearColor(0x2a2a2c); 
+renderer.setClearColor(0x000000); // Fond Noir Absolu
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 container.appendChild(renderer.domElement);
@@ -77,71 +79,53 @@ container.appendChild(renderer.domElement);
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 1.0, 0);
 
-function buildStudioFace() {
-    const ambientLight = new THREE.AmbientLight(0xffeedd, 0.6);
+function buildFuturisticStudio() {
+    const gridSize = 20;
+    const gridDivisions = 80;
+    const gridColor = 0x00ffff; // Bleu Cyan
+
+    // Grille du sol
+    const floorGrid = new THREE.GridHelper(gridSize, gridDivisions, gridColor, gridColor);
+    floorGrid.material.transparent = true;
+    floorGrid.material.opacity = 0.3;
+    scene.add(floorGrid);
+
+    // Grille du mur 1 (Fond)
+    const wallGrid1 = new THREE.GridHelper(gridSize, gridDivisions, gridColor, gridColor);
+    wallGrid1.rotation.x = Math.PI / 2;
+    wallGrid1.position.z = -gridSize / 2;
+    wallGrid1.position.y = gridSize / 2;
+    wallGrid1.material.transparent = true;
+    wallGrid1.material.opacity = 0.2;
+    scene.add(wallGrid1);
+
+    // Grille du mur 2 (Côté gauche)
+    const wallGrid2 = new THREE.GridHelper(gridSize, gridDivisions, gridColor, gridColor);
+    wallGrid2.rotation.z = Math.PI / 2;
+    wallGrid2.position.x = -gridSize / 2;
+    wallGrid2.position.y = gridSize / 2;
+    wallGrid2.material.transparent = true;
+    wallGrid2.material.opacity = 0.2;
+    scene.add(wallGrid2);
+
+    // Éclairage Studio (Bleu, Rose, Moutarde)
+    const ambientLight = new THREE.AmbientLight(0x111111);
     scene.add(ambientLight);
 
-    const spotLight = new THREE.SpotLight(0xfff0dd, 1.3);
-    spotLight.position.set(0, 6, 4);
-    spotLight.angle = Math.PI / 3;
-    spotLight.penumbra = 0.5;
-    spotLight.castShadow = true;
-    spotLight.shadow.mapSize.width = 2048;
-    spotLight.shadow.mapSize.height = 2048;
-    scene.add(spotLight);
+    const blueLight = new THREE.PointLight(0x0055ff, 1.5, 20);
+    blueLight.position.set(3, 3, 3);
+    blueLight.castShadow = true;
+    scene.add(blueLight);
 
-    const fillLight = new THREE.DirectionalLight(0x88aacc, 0.3);
-    fillLight.position.set(-4, 3, 3);
-    scene.add(fillLight);
+    const pinkLight = new THREE.PointLight(0xff00ff, 1.2, 20);
+    pinkLight.position.set(-3, 2, 2);
+    scene.add(pinkLight);
 
-    const floorGeo = new THREE.PlaneGeometry(30, 30);
-    const floorMat = new THREE.MeshStandardMaterial({ color: 0x5a5855, roughness: 0.9 });
-    const floor = new THREE.Mesh(floorGeo, floorMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.receiveShadow = true;
-    scene.add(floor);
-
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3c, roughness: 1.0 });
-    const wallBackGeo = new THREE.PlaneGeometry(30, 15);
-    const wallBack = new THREE.Mesh(wallBackGeo, wallMat);
-    wallBack.position.set(0, 7.5, -4);
-    wallBack.receiveShadow = true;
-    scene.add(wallBack);
-
-    const rugGeo = new THREE.PlaneGeometry(3.5, 2.0);
-    const rugMat = new THREE.MeshStandardMaterial({ color: 0xe0dcd3, roughness: 0.9 });
-    const rug = new THREE.Mesh(rugGeo, rugMat);
-    rug.rotation.x = -Math.PI / 2;
-    rug.position.set(0, 0.01, 0.5);
-    rug.receiveShadow = true;
-    scene.add(rug);
-
-    const sofaGeo = new THREE.BoxGeometry(2.8, 0.8, 1.0);
-    const sofaMat = new THREE.MeshStandardMaterial({ color: 0x3a5f78, roughness: 0.8 });
-    const sofa = new THREE.Mesh(sofaGeo, sofaMat);
-    sofa.position.set(-3.5, 0.4, -1.5);
-    sofa.castShadow = true;
-    sofa.receiveShadow = true;
-    scene.add(sofa);
-
-    const pillowGeo = new THREE.BoxGeometry(0.5, 0.4, 0.25);
-    const pillowMat = new THREE.MeshStandardMaterial({ color: 0xd4a017, roughness: 0.9 });
-    const pillow = new THREE.Mesh(pillowGeo, pillowMat);
-    pillow.position.set(-2.8, 0.85, -1.4);
-    pillow.rotation.z = Math.PI / 12;
-    pillow.rotation.y = Math.PI / 6;
-    pillow.castShadow = true;
-    scene.add(pillow);
-
-    const dresserGeo = new THREE.BoxGeometry(2.5, 1.2, 0.8);
-    const dresserMat = new THREE.MeshStandardMaterial({ color: 0xa67c52, roughness: 0.6 });
-    const dresser = new THREE.Mesh(dresserGeo, dresserMat);
-    dresser.position.set(3.5, 0.6, -2.5);
-    dresser.castShadow = true;
-    dresser.receiveShadow = true;
-    scene.add(dresser);
+    const mustardLight = new THREE.PointLight(0xffdb58, 1.5, 20);
+    mustardLight.position.set(0, 4, -4);
+    scene.add(mustardLight);
 }
-buildStudioFace();
+buildFuturisticStudio();
 
 // ==========================================
 // 3. VARIABLES GLOBALES
@@ -162,21 +146,27 @@ let basePelvisQuat = null;
 let baseGroundRefY2D = null;
 let baseScreenX0 = null;
 let baseScreenZ0 = null;
+let baseModelPos = null;
 
-const SMOOTH_FACTOR = 0.2; 
+const SMOOTH_FACTOR = 0.15; 
 
 // ==========================================
-// 4. CHARGEMENT ASYNCHRONE & BBOX DYNAMIQUE
+// 4. CHARGEMENT ASYNCHRONE & ANCRAGE
 // ==========================================
 new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     avatarModel = gltf.scene;
     if (gltf.animations) gltf.animations = [];
 
+    // Ajustement de la matière pour mieux refléter les lumières de couleur
     avatarModel.traverse((node) => {
         if (node.isMesh || node.isSkinnedMesh) {
             node.frustumCulled = false; 
             node.castShadow = true;     
             node.receiveShadow = true;
+            if (node.material) {
+                node.material.roughness = 0.4;
+                node.material.metalness = 0.2;
+            }
         }
         if (node.isSkinnedMesh) skinnedMeshes.push(node);
         
@@ -201,8 +191,7 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
 
     avatarModel.updateMatrixWorld(true);
     
-    // Le calcul de la Bounding Box est parfait : il trouve le point le plus bas du maillage 
-    // et l'aligne exactement sur le sol (Y=0). Plus besoin d'offset manuel !
+    // Aligne la plante des pieds du modèle à Y = 0 pile
     const scaledBbox = new THREE.Box3().setFromObject(avatarModel);
     avatarModel.position.set(0, -scaledBbox.min.y, 0); 
     avatarModel.updateMatrixWorld(true);
@@ -287,7 +276,6 @@ function extractRestDirections() {
     baseScreenX0 = (sHL0.x + sHR0.x) / 2;
     baseScreenZ0 = (sHL0.z + sHR0.z) / 2;
     
-    // Le point de départ idéal avec le pied posé sur le plancher (Y=0)
     baseModelPos = avatarModel.position.clone();
 
     restDirs.spine = new THREE.Vector3().subVectors(midShoulder, midHip).normalize();
@@ -302,7 +290,7 @@ function extractRestDirections() {
     restDirs.rightKnee = new THREE.Vector3().subVectors(getWPos(avatarBones.rightFoot), getWPos(avatarBones.rightKnee)).normalize();
 
     document.getElementById('loading').style.display = 'none';
-    logPanel.innerText = `✅ Correction géométrique accomplie.\nLes pieds reprennent leur forme d'origine.`;
+    logPanel.innerText = `✅ Studio Cyberpunk activé.\nSystème Mocap prêt.`;
 }
 
 function checkAutoStart() {
@@ -341,7 +329,7 @@ player.addEventListener('timeupdate', () => {
 });
 
 // ==========================================
-// 7. CINÉMATIQUE & ALIGNEMENT DES PIEDS
+// 7. CINÉMATIQUE & GESTION DES PIEDS
 // ==========================================
 function applyInheritedKinematics(bone, restDir, targetDir, rootDeltaQuat) {
     if (!bone || !restDir || !targetDir || !rootDeltaQuat) return;
@@ -366,29 +354,36 @@ function applyInheritedKinematics(bone, restDir, targetDir, rootDeltaQuat) {
     bone.updateMatrixWorld(true);
 }
 
-// 🔴 LA CORRECTION MAGIQUE POUR LES PIEDS
-function alignFootToGround(footBone, rootDeltaQuat) {
-    if (!footBone || !footBone.parent || !rootDeltaQuat) return;
+// Alignement au sol + Flexion de la cheville (Pointe des pieds)
+function alignFootToGround(footBone, heelMP, toeMP, rootDeltaQuat) {
+    if (!footBone || !footBone.parent || !rootDeltaQuat || !heelMP || !toeMP) return;
     
     footBone.parent.updateMatrixWorld(true);
     const parentWorldQuat = new THREE.Quaternion();
     footBone.parent.getWorldQuaternion(parentWorldQuat);
     
-    // On reprend la rotation PARFAITE du pied d'origine (qui est à plat dans le modèle)
-    // Et on lui ajoute uniquement la rotation du bassin pour qu'il s'oriente avec le corps.
-    const targetWorldQuat = rootDeltaQuat.clone().multiply(footBone.userData.initialWorldQuat); 
+    // Calcul de l'inclinaison réelle du pied
+    const dy = toeMP.y - heelMP.y; 
+    const dz = toeMP.z - heelMP.z;
+    const dx = toeMP.x - heelMP.x;
+    const horizontalDist = Math.sqrt(dx*dx + dz*dz);
     
-    // Conversion en rotation locale par rapport au mollet (qui lui bouge)
+    let pitchAngle = Math.atan2(dy, horizontalDist);
+    pitchAngle = Math.max(-Math.PI/4, Math.min(Math.PI/3, pitchAngle));
+
+    const baseWorldQuat = rootDeltaQuat.clone().multiply(footBone.userData.initialWorldQuat);
+    const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), pitchAngle);
+    const targetWorldQuat = baseWorldQuat.multiply(pitchQuat);
+    
     const targetLocalQuat = parentWorldQuat.invert().multiply(targetWorldQuat);
-    
-    footBone.quaternion.slerp(targetLocalQuat, 0.5); // Slerp réactif pour éviter que la pointe plonge
+    footBone.quaternion.slerp(targetLocalQuat, SMOOTH_FACTOR);
     footBone.updateMatrixWorld(true);
 }
 
 function applyPose(frame) {
     if (!frame || !avatarModel || !basePelvisQuat || baseGroundRefY2D === null) return;
 
-    // 🔴 1. POSITIONNEMENT DE L'AVATAR (Sauts & Translation)
+    // 🔴 1. TRANSLATION & SAUTS
     const currentLowestY2D = getLowestY2D(frame);
     
     const sHL = getScreenPoint(frame, 11);
@@ -406,7 +401,7 @@ function applyPose(frame) {
 
     const targetPos = baseModelPos.clone();
     targetPos.x += deltaX * ROOM_WIDTH;
-    targetPos.y += Math.max(0, deltaY * ROOM_HEIGHT); // Ne descend JAMAIS sous le niveau 0
+    targetPos.y += Math.max(0, deltaY * ROOM_HEIGHT); 
     targetPos.z += deltaZ * ROOM_DEPTH;
 
     avatarModel.position.lerp(targetPos, SMOOTH_FACTOR);
@@ -471,9 +466,12 @@ function applyPose(frame) {
     applyInheritedKinematics(avatarBones.rightHip, restDirs.rightHip, rHipDir, deltaPelvis);
     applyInheritedKinematics(avatarBones.rightKnee, restDirs.rightKnee, rKneeDir, deltaPelvis);
 
-    // 🔴 ALIGNEMENT PROPRE DES PIEDS : Conserve l'aspect plat initial, mais tourne avec le corps
-    alignFootToGround(avatarBones.leftFoot, deltaPelvis);
-    alignFootToGround(avatarBones.rightFoot, deltaPelvis);
+    // 🔴 GESTION DES CHEVILLES (Flexion avec maintien plat)
+    const heelL = getPoint(frame, 29), heelR = getPoint(frame, 30);
+    const toeL = getPoint(frame, 31), toeR = getPoint(frame, 32);
+
+    alignFootToGround(avatarBones.leftFoot, heelL, toeL, deltaPelvis);
+    alignFootToGround(avatarBones.rightFoot, heelR, toeR, deltaPelvis);
 
     skinnedMeshes.forEach(mesh => {
         if (mesh.skeleton) mesh.skeleton.update();
