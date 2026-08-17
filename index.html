@@ -3,15 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hdance - MetaHuman Differential Kinematics</title>
+    <title>Hdance - Auto-Axis Absolute Kinematics</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; background-color: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; overflow: hidden; }
         #top-half { display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0; }
         #video-container { flex: 1; background: #000; border-right: 2px solid #333; }
         iframe { width: 100%; height: 100%; border: none; }
         #canvas-container { flex: 1; position: relative; background: #1a1a1a; }
-        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #00ffcc; font-weight: bold; text-align: center; }
-        #bottom-half { height: 280px; display: flex; background: #0a0a0a; }
+        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #00ffcc; font-weight: bold; text-align: center; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 8px; border: 1px solid #00ffcc;}
+        #bottom-half { height: 250px; display: flex; background: #0a0a0a; }
         #controls-panel { width: 300px; padding: 15px; border-right: 2px solid #333; display: flex; flex-direction: column; gap: 10px; }
         .btn-action { background: #00ffcc; color: #000; padding: 10px; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; }
         .btn-action:hover { background: #00cca3; }
@@ -30,18 +30,18 @@
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
     <div id="canvas-container">
-        <div id="loading">Initialisation du moteur Delta...</div>
+        <div id="loading">Analyse des axes 3D & Synchronisation auto...</div>
     </div>
 </div>
 
 <div id="bottom-half">
     <div id="controls-panel">
         <h3 style="margin:0; color:#fff;">⚙️ Contrôles</h3>
-        <button id="btn-force-play" class="btn-action">▶ Lancer Synchronisation</button>
-        <button id="btn-debug-spheres" class="btn-action" style="background:#ffaa00; color:#000;">Afficher/Masquer Sphères IA</button>
-        <button id="btn-recalibrate" class="btn-action" style="background:#cc00ff; color:#fff;">🔄 Recalibrer Position Initiale</button>
+        <button id="btn-force-play" class="btn-action">▶ Lancer Vidéo / 3D</button>
+        <button id="btn-debug-spheres" class="btn-action" style="background:#ffaa00; color:#000;">Afficher Sphères IA</button>
+        <button id="btn-debug-skeleton" class="btn-action" style="background:#444; color:#fff;">Afficher Lignes Squelette</button>
     </div>
-    <div id="log-panel">Attente du modèle 1.glb...</div>
+    <div id="log-panel">Attente du système...</div>
 </div>
 
 <script>
@@ -52,14 +52,19 @@ const BONE_DICTIONARY = {
     hips: "DHIbodypelvis_04",
     spine: "DHIbodyspine_01_05",
     neck: "DHIbodyneck_01_010",
+    head: "DHIbodyhead_012",
     leftShoulder: "DHIbodyupperarm_l_014",
     rightShoulder: "DHIbodyupperarm_r_0145",
     leftElbow: "DHIbodylowerarm_l_015",
     rightElbow: "DHIbodylowerarm_r_0146",
+    leftHand: "DHIbodyhand_l_016",
+    rightHand: "DHIbodyhand_r_0147",
     leftHip: "DHIbodythigh_l_0277",
     rightHip: "DHIbodythigh_r_0310",
     leftKnee: "DHIbodycalf_l_0278",
-    rightKnee: "DHIbodycalf_r_0311"
+    rightKnee: "DHIbodycalf_r_0311",
+    leftFoot: "DHIbodyfoot_l_0279",
+    rightFoot: "DHIbodyfoot_r_0312"
 };
 
 // ==========================================
@@ -90,22 +95,34 @@ const matGreen = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
 
 for(let i = 0; i < 21; i++) {
     const mesh = new THREE.Mesh(sphereGeo, i % 2 !== 0 ? matRed : matGreen);
+    mesh.visible = false;
     scene.add(mesh);
     debugSpheres.push(mesh);
 }
 
 // ==========================================
-// 3. CHARGEMENT DU GLB & CAPTURE MATRICES
+// 3. VARIABLES GLOBALES DE SYNCHRONISATION
 // ==========================================
 let avatarModel = null;
 let avatarBones = {};
+let skeletonHelper = null;
 const logPanel = document.getElementById('log-panel');
 
+let posesData = [];
+let isModelReady = false;
+let isJsonReady = false;
+
+// Stockage des vecteurs natifs du GLB
+const restDirs = {};
+
+// ==========================================
+// 4. CHARGEMENT ASYNCHRONE (GLB & JSON)
+// ==========================================
 new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     avatarModel = gltf.scene;
     if (gltf.animations) gltf.animations = [];
 
-    // Force la mise à jour des matrices pour capturer l'état "A-Pose / T-Pose"
+    // Force la mise à jour des matrices pour lire la T-Pose exacte
     avatarModel.updateMatrixWorld(true);
 
     avatarModel.traverse((node) => {
@@ -114,13 +131,17 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
                 if (node.name === exactName) {
                     avatarBones[logicalName] = node;
                     
-                    // On sauvegarde le Quaternion GLOBAL de repos de chaque os
+                    // Sauvegarde du Quaternion Global de repos (T-Pose)
                     node.userData.initialWorldQuat = new THREE.Quaternion();
                     node.getWorldQuaternion(node.userData.initialWorldQuat);
                 }
             }
         }
     });
+
+    skeletonHelper = new THREE.SkeletonHelper(avatarModel);
+    skeletonHelper.visible = false;
+    scene.add(skeletonHelper);
 
     const bbox = new THREE.Box3().setFromObject(avatarModel);
     const size = bbox.getSize(new THREE.Vector3());
@@ -129,88 +150,102 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     avatarModel.position.set(0, 0, 0);
     scene.add(avatarModel);
     
-    document.getElementById('loading').style.display = 'none';
-    logPanel.innerText = `✅ Modèle MetaHuman chargé.\nMatrices globales de repos capturées.`;
+    isModelReady = true;
+    checkAutoStart();
 });
-
-// ==========================================
-// 4. LECTURE JSON & VIDÉO
-// ==========================================
-let posesData = [];
-let currentVideoTime = 0, isManualPlaying = false, manualStartTime = 0;
-const player = Stream(document.getElementById('stream-player'));
-
-player.addEventListener('play', () => { isManualPlaying = true; manualStartTime = Date.now() - (currentVideoTime * 1000); });
-player.addEventListener('timeupdate', (e) => { if(e.currentTime > 0) currentVideoTime = e.currentTime; });
 
 fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
     .then(r => r.text())
     .then(text => {
         text.trim().split('\n').slice(1).forEach(l => posesData.push(JSON.parse(l)));
+        isJsonReady = true;
+        checkAutoStart();
     });
 
 // ==========================================
-// 5. MOTEUR DIFFÉRENTIEL (Le cœur du secret)
+// 5. AUTO-CALIBRAGE DES AXES 3D
 // ==========================================
-let baseVectors = null;
+function getWPos(bone) {
+    const p = new THREE.Vector3();
+    if(bone) bone.getWorldPosition(p);
+    return p;
+}
+
+function extractRestDirections() {
+    // Calcule dynamiquement les vecteurs de direction de l'avatar 3D dans sa pose de base
+    const sL = getWPos(avatarBones.leftShoulder), sR = getWPos(avatarBones.rightShoulder);
+    const hL = getWPos(avatarBones.leftHip), hR = getWPos(avatarBones.rightHip);
+    
+    const midHip = new THREE.Vector3().addVectors(hL, hR).multiplyScalar(0.5);
+    const midShoulder = new THREE.Vector3().addVectors(sL, sR).multiplyScalar(0.5);
+
+    restDirs.spine = new THREE.Vector3().subVectors(midShoulder, midHip).normalize();
+    restDirs.neck = new THREE.Vector3().subVectors(getWPos(avatarBones.head), midShoulder).normalize();
+    
+    restDirs.leftShoulder = new THREE.Vector3().subVectors(getWPos(avatarBones.leftElbow), sL).normalize();
+    restDirs.leftElbow = new THREE.Vector3().subVectors(getWPos(avatarBones.leftHand), getWPos(avatarBones.leftElbow)).normalize();
+    
+    restDirs.rightShoulder = new THREE.Vector3().subVectors(getWPos(avatarBones.rightElbow), sR).normalize();
+    restDirs.rightElbow = new THREE.Vector3().subVectors(getWPos(avatarBones.rightHand), getWPos(avatarBones.rightElbow)).normalize();
+    
+    restDirs.leftHip = new THREE.Vector3().subVectors(getWPos(avatarBones.leftKnee), hL).normalize();
+    restDirs.leftKnee = new THREE.Vector3().subVectors(getWPos(avatarBones.leftFoot), getWPos(avatarBones.leftKnee)).normalize();
+    
+    restDirs.rightHip = new THREE.Vector3().subVectors(getWPos(avatarBones.rightKnee), hR).normalize();
+    restDirs.rightKnee = new THREE.Vector3().subVectors(getWPos(avatarBones.rightFoot), getWPos(avatarBones.rightKnee)).normalize();
+    
+    logPanel.innerText = `✅ Axes 3D extraits dynamiquement.\n✅ JSON chargé.\n🎯 Avatar calé sur la Frame 0 du prof !`;
+}
+
+function checkAutoStart() {
+    if (isModelReady && isJsonReady) {
+        document.getElementById('loading').style.display = 'none';
+        extractRestDirections();
+        // FORCE L'AVATAR SUR LA POSITION DE DÉPART DE LA VIDÉO AVANT MÊME LA LECTURE
+        applyPose(posesData[0]); 
+    }
+}
+
+// ==========================================
+// 6. MOTEUR CINÉMATIQUE ABSOLU INTELLIGENT
+// ==========================================
+let currentVideoTime = 0, isManualPlaying = false, manualStartTime = 0;
+const player = Stream(document.getElementById('stream-player'));
+
+player.addEventListener('play', () => { isManualPlaying = true; manualStartTime = Date.now() - (currentVideoTime * 1000); });
+player.addEventListener('pause', () => { isManualPlaying = false; });
+player.addEventListener('timeupdate', (e) => { if(e.currentTime > 0) currentVideoTime = e.currentTime; });
 
 function getPoint(frame, k) {
     const idx = 133 + (k * 3);
     return new THREE.Vector3(frame[idx], -frame[idx+1], -frame[idx+2]);
 }
 
-// Fonction pour capturer la "pose neutre" de la vidéo à la Frame 0
-function captureBasePose(frame) {
-    baseVectors = {};
+function applyAutoKinematics(bone, restDir, pStart, pEnd) {
+    if (!bone || !restDir || !pStart || !pEnd) return;
     
-    const sL = getPoint(frame, 3), sR = getPoint(frame, 4);
-    const hL = getPoint(frame, 11), hR = getPoint(frame, 12);
-    const midHip = new THREE.Vector3().addVectors(hL, hR).multiplyScalar(0.5);
-    const midShoulder = new THREE.Vector3().addVectors(sL, sR).multiplyScalar(0.5);
-
-    // On enregistre les vecteurs de direction initiaux de l'acteur
-    baseVectors.spine = new THREE.Vector3().subVectors(midShoulder, midHip).normalize();
-    baseVectors.neck = new THREE.Vector3().subVectors(getPoint(frame, 0), midShoulder).normalize();
-    baseVectors.leftShoulder = new THREE.Vector3().subVectors(getPoint(frame, 5), sL).normalize();
-    baseVectors.rightShoulder = new THREE.Vector3().subVectors(getPoint(frame, 6), sR).normalize();
-    baseVectors.leftElbow = new THREE.Vector3().subVectors(getPoint(frame, 7), getPoint(frame, 5)).normalize();
-    baseVectors.rightElbow = new THREE.Vector3().subVectors(getPoint(frame, 8), getPoint(frame, 6)).normalize();
+    // 1. Calcul du vecteur cible demandé par l'IA
+    const targetDir = new THREE.Vector3().subVectors(pEnd, pStart).normalize();
     
-    baseVectors.leftHip = new THREE.Vector3().subVectors(getPoint(frame, 13), hL).normalize();
-    baseVectors.rightHip = new THREE.Vector3().subVectors(getPoint(frame, 14), hR).normalize();
-    baseVectors.leftKnee = new THREE.Vector3().subVectors(getPoint(frame, 15), getPoint(frame, 13)).normalize();
-    baseVectors.rightKnee = new THREE.Vector3().subVectors(getPoint(frame, 16), getPoint(frame, 14)).normalize();
-
-    logPanel.innerText += `\n🎯 Calibrage vidéo terminé ! (Vecteurs de référence verrouillés).`;
-}
-
-// Application du Delta
-function applyDeltaKinematics(bone, logicalName, pStart, pEnd) {
-    if (!bone || !baseVectors[logicalName] || !pStart || !pEnd) return;
+    // 2. Calcul de la rotation pour passer du vecteur de repos 3D au vecteur cible IA
+    const rot = new THREE.Quaternion().setFromUnitVectors(restDir, targetDir);
     
-    // 1. Vecteur actuel de l'acteur
-    const currentDir = new THREE.Vector3().subVectors(pEnd, pStart).normalize();
+    // 3. Application de cette rotation à la posture globale initiale de l'os
+    const targetWorldQuat = rot.multiply(bone.userData.initialWorldQuat);
     
-    // 2. Calcul du delta (Quelle rotation l'acteur a fait depuis la Frame 0 ?)
-    const deltaQuat = new THREE.Quaternion().setFromUnitVectors(baseVectors[logicalName], currentDir);
-    
-    // 3. On applique ce Delta mathématique EXACT à l'orientation globale de base du modèle 3D
-    const targetWorldQuat = deltaQuat.clone().multiply(bone.userData.initialWorldQuat);
-    
-    // 4. On reconvertit en Quaternion Local pour Three.js
+    // 4. Conversion en espace local
     const parentWorldQuat = new THREE.Quaternion();
-    if (bone.parent) bone.parent.getWorldQuaternion(parentWorldQuat);
-    
-    const localTargetQuat = parentWorldQuat.invert().multiply(targetWorldQuat);
-    
-    // 5. Application douce (slerp) pour éviter les micro-saccades
-    bone.quaternion.slerp(localTargetQuat, 0.6);
+    if (bone.parent && bone.parent.isBone) {
+        bone.parent.getWorldQuaternion(parentWorldQuat);
+        const localQuat = parentWorldQuat.invert().multiply(targetWorldQuat);
+        bone.quaternion.slerp(localQuat, 0.8);
+    } else {
+        bone.quaternion.slerp(targetWorldQuat, 0.8);
+    }
 }
 
 function applyPose(frame) {
-    if (!frame || !avatarModel) return;
-
-    if (!baseVectors) captureBasePose(frame);
+    if (!frame || !avatarModel || !restDirs.spine) return;
 
     for(let i = 0; i < 21; i++) {
         const pt = getPoint(frame, i);
@@ -223,6 +258,7 @@ function applyPose(frame) {
     const wL = getPoint(frame, 7), wR = getPoint(frame, 8);
     const hL = getPoint(frame, 11), hR = getPoint(frame, 12);
     const kL = getPoint(frame, 13), kR = getPoint(frame, 14);
+    const aL = getPoint(frame, 15), aR = getPoint(frame, 16);
     
     const midHip = new THREE.Vector3().addVectors(hL, hR).multiplyScalar(0.5);
     const midShoulder = new THREE.Vector3().addVectors(sL, sR).multiplyScalar(0.5);
@@ -237,19 +273,21 @@ function applyPose(frame) {
         }
     }
 
-    // Application pure des différences de rotation
-    applyDeltaKinematics(avatarBones.spine, 'spine', midHip, midShoulder);
-    applyDeltaKinematics(avatarBones.neck, 'neck', midShoulder, nose);
+    // Kinématique Auto-Axe (Mappe l'IA directement sur la morphologie du GLB)
+    applyAutoKinematics(avatarBones.spine, restDirs.spine, midHip, midShoulder);
+    applyAutoKinematics(avatarBones.neck, restDirs.neck, midShoulder, nose);
     
-    applyDeltaKinematics(avatarBones.leftShoulder, 'leftShoulder', sL, eL);
-    applyDeltaKinematics(avatarBones.leftElbow, 'leftElbow', eL, wL);
-    applyDeltaKinematics(avatarBones.rightShoulder, 'rightShoulder', sR, eR);
-    applyDeltaKinematics(avatarBones.rightElbow, 'rightElbow', eR, wR);
+    applyAutoKinematics(avatarBones.leftShoulder, restDirs.leftShoulder, sL, eL);
+    applyAutoKinematics(avatarBones.leftElbow, restDirs.leftElbow, eL, wL);
+    applyAutoKinematics(avatarBones.rightShoulder, restDirs.rightShoulder, sR, eR);
+    applyAutoKinematics(avatarBones.rightElbow, restDirs.rightElbow, eR, wR);
     
-    applyDeltaKinematics(avatarBones.leftHip, 'leftHip', hL, kL);
-    applyDeltaKinematics(avatarBones.leftKnee, 'leftKnee', kL, getPoint(frame, 15));
-    applyDeltaKinematics(avatarBones.rightHip, 'rightHip', hR, kR);
-    applyDeltaKinematics(avatarBones.rightKnee, 'rightKnee', kR, getPoint(frame, 16));
+    applyAutoKinematics(avatarBones.leftHip, restDirs.leftHip, hL, kL);
+    applyAutoKinematics(avatarBones.leftKnee, restDirs.leftKnee, kL, aL);
+    applyAutoKinematics(avatarBones.rightHip, restDirs.rightHip, hR, kR);
+    applyAutoKinematics(avatarBones.rightKnee, restDirs.rightKnee, kR, aR);
+
+    if(skeletonHelper) skeletonHelper.update();
 }
 
 function animate() {
@@ -264,22 +302,30 @@ function animate() {
 animate();
 
 // ==========================================
-// 6. ÉVÉNEMENTS HTML
+// 7. ÉVÉNEMENTS HTML
 // ==========================================
 document.getElementById('btn-force-play').addEventListener('click', () => {
     isManualPlaying = !isManualPlaying;
-    if(isManualPlaying) manualStartTime = Date.now() - (currentVideoTime * 1000);
+    if(isManualPlaying) {
+        manualStartTime = Date.now() - (currentVideoTime * 1000);
+        document.getElementById('btn-force-play').innerText = "⏸ Pause Vidéo / 3D";
+    } else {
+        document.getElementById('btn-force-play').innerText = "▶ Lancer Vidéo / 3D";
+    }
 });
 
-let spheresVisible = true;
+let spheresVisible = false;
 document.getElementById('btn-debug-spheres').addEventListener('click', (e) => {
     spheresVisible = !spheresVisible;
     debugSpheres.forEach(s => s.visible = spheresVisible);
+    e.target.innerText = spheresVisible ? "Masquer Sphères IA" : "Afficher Sphères IA";
 });
 
-document.getElementById('btn-recalibrate').addEventListener('click', () => {
-    baseVectors = null;
-    logPanel.innerText += `\n🔄 Relance du calibrage sur la position actuelle de la vidéo...`;
+document.getElementById('btn-debug-skeleton').addEventListener('click', (e) => {
+    if(skeletonHelper) {
+        skeletonHelper.visible = !skeletonHelper.visible;
+        e.target.innerText = skeletonHelper.visible ? "Masquer Lignes Squelette" : "Afficher Lignes Squelette";
+    }
 });
 </script>
 
