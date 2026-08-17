@@ -3,18 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hdance - Root Motion & Vertical Lock</title>
+    <title>Hdance - Precision Root Motion & Grounding</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; background-color: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; overflow: hidden; }
-        
         #top-half { display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0; }
         #video-container { flex: 1; background: #000; border-right: 2px solid #333; }
         iframe { width: 100%; height: 100%; border: none; }
-        
         #canvas-container { flex: 1; position: relative; background: #1a1a1a; }
-        
         #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #00ffcc; font-weight: bold; text-align: center; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 8px; border: 1px solid #00ffcc; z-index: 10;}
-        
         #bottom-half { height: 200px; display: flex; background: #0a0a0a; border-top: 2px solid #333; z-index: 5; }
         #controls-panel { width: 300px; padding: 15px; border-right: 2px solid #333; display: flex; flex-direction: column; gap: 10px; }
         .btn-action { background: #00ffcc; color: #000; padding: 10px; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; pointer-events: auto; }
@@ -34,14 +30,14 @@
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
     <div id="canvas-container">
-        <div id="loading">Analyse des mouvements globaux (Root Motion)...</div>
+        <div id="loading">Analyse gravitationnelle et posturale en cours...</div>
     </div>
 </div>
 
 <div id="bottom-half">
     <div id="controls-panel">
         <h3 style="margin:0; color:#fff;">⚙️ Contrôles</h3>
-        <p style="font-size: 11px; color: #aaa; margin: 0;">L'avatar bouge désormais librement dans le studio.</p>
+        <p style="font-size: 11px; color: #aaa; margin: 0;">L'avatar est ancré au sol. Posture corrigée.</p>
         <button id="btn-debug-skeleton" class="btn-action" style="background:#ffaa00; color:#000; margin-top: 10px;">🦴 Afficher Lignes Squelette</button>
         <button id="btn-toggle-mesh" class="btn-action" style="background:#444; color:#fff;">👻 Masquer la peau 3D</button>
     </div>
@@ -163,16 +159,14 @@ let isJsonReady = false;
 const restDirs = {};
 let basePelvisQuat = null;
 let baseMediaHip = null;
-let baseModelPos = null;
+let baseHipLocalPos = null;
 
 // ==========================================
-// 4. CHARGEMENT ASYNCHRONE
+// 4. CHARGEMENT ASYNCHRONE & ANCRAGE GRAVITATIONNEL
 // ==========================================
 new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     avatarModel = gltf.scene;
     if (gltf.animations) gltf.animations = [];
-
-    avatarModel.updateMatrixWorld(true);
 
     avatarModel.traverse((node) => {
         if (node.isMesh || node.isSkinnedMesh) {
@@ -197,12 +191,20 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     skeletonHelper.visible = false;
     scene.add(skeletonHelper);
 
-    const bbox = new THREE.Box3().setFromObject(avatarModel);
-    const size = bbox.getSize(new THREE.Vector3());
+    // 🔴 1. CORRECTION DE LA HAUTEUR (Anti-enfouissement)
+    const initialBbox = new THREE.Box3().setFromObject(avatarModel);
+    const size = initialBbox.getSize(new THREE.Vector3());
     if (size.y > 0) avatarModel.scale.setScalar(1.75 / size.y);
 
-    // Initialisation du modèle au point 0,0,0
-    avatarModel.position.set(0, 0, 0); 
+    avatarModel.updateMatrixWorld(true);
+    
+    // On recalcule la boîte de collision APRÈS la mise à l'échelle
+    const scaledBbox = new THREE.Box3().setFromObject(avatarModel);
+    
+    // Le point Y le plus bas de la Bbox est placé précisément à 0 sur le sol
+    avatarModel.position.set(0, -scaledBbox.min.y, 0); 
+    avatarModel.updateMatrixWorld(true);
+    
     scene.add(avatarModel);
     
     isModelReady = true;
@@ -218,11 +220,10 @@ fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
     });
 
 // ==========================================
-// 5. MATHÉMATIQUES & REPERE 3D
+// 5. MATHÉMATIQUES POSTURALES & REPERE 3D
 // ==========================================
 function getPoint(frame, k) {
     const idx = 133 + (k * 3);
-    // Un léger facteur de multiplication (ex: 1.5) peut être ajouté ici si l'avatar ne se déplace pas assez loin
     return new THREE.Vector3(frame[idx], -frame[idx+1], -frame[idx+2]);
 }
 
@@ -235,12 +236,13 @@ function getWPos(bone) {
     return p;
 }
 
-// 🔴 NOUVEAU: On force l'axe Y (Haut) à être parfaitement vertical pour empêcher le corps de pencher !
+// 🔴 2. CORRECTION DE L'AXE Y (Anti-basculement)
 function computeRootBasis(pLeft, pRight) {
-    const x = new THREE.Vector3().subVectors(pRight, pLeft).normalize(); // Epaules ou hanches
-    const y = new THREE.Vector3(0, 1, 0); // On FORCE la verticale
-    const z = new THREE.Vector3().crossVectors(x, y).normalize(); // Avant
-    x.crossVectors(y, z).normalize(); // Orthogonalisation finale
+    const x = new THREE.Vector3().subVectors(pRight, pLeft).normalize();
+    // On FORCE l'axe Haut/Bas à être parfaitement vertical pour empêcher le buste de pencher
+    const y = new THREE.Vector3(0, 1, 0); 
+    const z = new THREE.Vector3().crossVectors(x, y).normalize();
+    x.crossVectors(y, z).normalize(); 
     const mat = new THREE.Matrix4().makeBasis(x, y, z);
     return new THREE.Quaternion().setFromRotationMatrix(mat);
 }
@@ -252,14 +254,15 @@ function extractRestDirections() {
     const midHip = new THREE.Vector3().addVectors(hL, hR).multiplyScalar(0.5);
     const midShoulder = new THREE.Vector3().addVectors(sL, sR).multiplyScalar(0.5);
 
-    // On calcule l'orientation du bassin bloquée sur l'axe Y
     basePelvisQuat = computeRootBasis(hL, hR);
 
-    // Sauvegarde de la translation
     const frame0 = posesData[0];
     const hL0 = getPoint(frame0, 11), hR0 = getPoint(frame0, 12);
     baseMediaHip = new THREE.Vector3().addVectors(hL0, hR0).multiplyScalar(0.5);
-    baseModelPos = avatarModel.position.clone(); // Toujours 0,0,0
+    
+    if (avatarBones.hips) {
+        baseHipLocalPos = avatarBones.hips.position.clone();
+    }
 
     restDirs.spine = new THREE.Vector3().subVectors(midShoulder, midHip).normalize();
     restDirs.neck = new THREE.Vector3().subVectors(getWPos(avatarBones.head), midShoulder).normalize();
@@ -273,7 +276,7 @@ function extractRestDirections() {
     restDirs.rightKnee = new THREE.Vector3().subVectors(getWPos(avatarBones.rightFoot), getWPos(avatarBones.rightKnee)).normalize();
     
     document.getElementById('loading').style.display = 'none';
-    logPanel.innerText = `✅ Modèle droit, pieds au sol.\nPrêt à se déplacer dans la pièce !`;
+    logPanel.innerText = `✅ Modèle droit, parfaitement posé au sol.\n✅ Déplacement actif (Root Motion).`;
 }
 
 function checkAutoStart() {
@@ -284,7 +287,7 @@ function checkAutoStart() {
 }
 
 // ==========================================
-// 6. SYNCHRONISATION EXACTE
+// 6. SYNCHRONISATION LECTEUR
 // ==========================================
 let currentVideoTime = 0;
 let isVideoPlaying = false;
@@ -312,14 +315,13 @@ player.addEventListener('timeupdate', () => {
 });
 
 // ==========================================
-// 7. MOTEUR CINÉMATIQUE (Root Motion)
+// 7. MOTEUR CINÉMATIQUE (Root Motion Précis)
 // ==========================================
-function applyInheritedKinematics(bone, restDir, pStart, pEnd, rootDeltaQuat) {
-    if (!bone || !restDir || !pStart || !pEnd || !rootDeltaQuat) return;
+function applyInheritedKinematics(bone, restDir, targetDir, rootDeltaQuat) {
+    if (!bone || !restDir || !targetDir || !rootDeltaQuat) return;
     
     if (bone.parent) bone.parent.updateMatrixWorld(true);
 
-    const targetDir = new THREE.Vector3().subVectors(pEnd, pStart).normalize();
     const inheritedBaseDir = restDir.clone().applyQuaternion(rootDeltaQuat).normalize();
     const bendingQuat = new THREE.Quaternion().setFromUnitVectors(inheritedBaseDir, targetDir);
     
@@ -330,16 +332,16 @@ function applyInheritedKinematics(bone, restDir, pStart, pEnd, rootDeltaQuat) {
     if (bone.parent && bone.parent.isBone) {
         bone.parent.getWorldQuaternion(parentWorldQuat);
         const localQuat = parentWorldQuat.invert().multiply(targetWorldQuat);
-        bone.quaternion.slerp(localQuat, 0.9);
+        bone.quaternion.slerp(localQuat, 0.85);
     } else {
-        bone.quaternion.slerp(targetWorldQuat, 0.9);
+        bone.quaternion.slerp(targetWorldQuat, 0.85);
     }
     
     bone.updateMatrixWorld(true);
 }
 
 function applyPose(frame) {
-    if (!frame || !avatarModel || !basePelvisQuat || !baseMediaHip) return;
+    if (!frame || !avatarModel || !basePelvisQuat || !baseMediaHip || !baseHipLocalPos) return;
 
     const nose = getPoint(frame, 0);
     const sL = getPoint(frame, 3), sR = getPoint(frame, 4);
@@ -350,44 +352,68 @@ function applyPose(frame) {
     const aL = getPoint(frame, 15), aR = getPoint(frame, 16);
     
     const midHip = new THREE.Vector3().addVectors(hL, hR).multiplyScalar(0.5);
-
-    // 🔴 ROOT MOTION GLOBAL : On déplace tout le conteneur du personnage !
-    const deltaPos = midHip.clone().sub(baseMediaHip);
-    const targetModelPos = baseModelPos.clone().add(deltaPos);
-    
-    // Le personnage se déplace dans l'espace, gardant ses pieds parfaitement posés au sol
-    avatarModel.position.lerp(targetModelPos, 0.9);
+    const midShoulder = new THREE.Vector3().addVectors(sL, sR).multiplyScalar(0.5);
 
     let deltaPelvis = new THREE.Quaternion();
 
-    if (avatarBones.hips) {
-        // Rotation contrainte (Pas de basculement en avant !)
+    if (avatarBones.hips && avatarBones.hips.parent) {
+        // 🔴 3. ROOT MOTION : Déplacement EXACT du bassin dans l'espace local
+        const currentLocalHip = avatarBones.hips.parent.worldToLocal(midHip.clone());
+        const baseLocalHip = avatarBones.hips.parent.worldToLocal(baseMediaHip.clone());
+        const localDelta = currentLocalHip.sub(baseLocalHip);
+        
+        // Amortissement de l'axe Z (profondeur) pour éviter les fuites hasardeuses
+        localDelta.z *= 0.3;
+        
+        const targetPos = baseHipLocalPos.clone().add(localDelta);
+        avatarBones.hips.position.lerp(targetPos, 0.85);
+
+        // Rotation stricte (Pivot uniquement)
         const currentPelvisQuat = computeRootBasis(hL, hR);
         deltaPelvis = currentPelvisQuat.clone().multiply(basePelvisQuat.clone().invert());
         
         const targetHipsGlobal = deltaPelvis.clone().multiply(avatarBones.hips.userData.initialWorldQuat);
         
-        if (avatarBones.hips.parent) avatarBones.hips.parent.updateMatrixWorld(true);
+        avatarBones.hips.parent.updateMatrixWorld(true);
         const parentQuat = new THREE.Quaternion();
-        if(avatarBones.hips.parent) avatarBones.hips.parent.getWorldQuaternion(parentQuat);
+        avatarBones.hips.parent.getWorldQuaternion(parentQuat);
         
         const targetHipsLocal = parentQuat.invert().multiply(targetHipsGlobal);
-        avatarBones.hips.quaternion.slerp(targetHipsLocal, 0.9);
+        avatarBones.hips.quaternion.slerp(targetHipsLocal, 0.85);
         avatarBones.hips.updateMatrixWorld(true);
     }
 
-    applyInheritedKinematics(avatarBones.spine, restDirs.spine, midHip, new THREE.Vector3().addVectors(sL, sR).multiplyScalar(0.5), deltaPelvis);
-    applyInheritedKinematics(avatarBones.neck, restDirs.neck, new THREE.Vector3().addVectors(sL, sR).multiplyScalar(0.5), nose, deltaPelvis);
+    // 🔴 4. CONTRAINTE POSTURALE : Écrase la profondeur de la colonne pour empêcher l'inclinaison
+    const spineDir = new THREE.Vector3().subVectors(midShoulder, midHip);
+    spineDir.z *= 0.3; // Maintient le torse droit
+    spineDir.normalize();
+
+    const neckDir = new THREE.Vector3().subVectors(nose, midShoulder);
+    neckDir.z *= 0.3;
+    neckDir.normalize();
+
+    const lShoulderDir = new THREE.Vector3().subVectors(eL, sL).normalize();
+    const lElbowDir = new THREE.Vector3().subVectors(wL, eL).normalize();
+    const rShoulderDir = new THREE.Vector3().subVectors(eR, sR).normalize();
+    const rElbowDir = new THREE.Vector3().subVectors(wR, eR).normalize();
+    const lHipDir = new THREE.Vector3().subVectors(kL, hL).normalize();
+    const lKneeDir = new THREE.Vector3().subVectors(aL, kL).normalize();
+    const rHipDir = new THREE.Vector3().subVectors(kR, hR).normalize();
+    const rKneeDir = new THREE.Vector3().subVectors(aR, kR).normalize();
+
+    // Application propre des vecteurs directions avec héritage
+    applyInheritedKinematics(avatarBones.spine, restDirs.spine, spineDir, deltaPelvis);
+    applyInheritedKinematics(avatarBones.neck, restDirs.neck, neckDir, deltaPelvis);
     
-    applyInheritedKinematics(avatarBones.leftShoulder, restDirs.leftShoulder, sL, eL, deltaPelvis);
-    applyInheritedKinematics(avatarBones.leftElbow, restDirs.leftElbow, eL, wL, deltaPelvis);
-    applyInheritedKinematics(avatarBones.rightShoulder, restDirs.rightShoulder, sR, eR, deltaPelvis);
-    applyInheritedKinematics(avatarBones.rightElbow, restDirs.rightElbow, eR, wR, deltaPelvis);
+    applyInheritedKinematics(avatarBones.leftShoulder, restDirs.leftShoulder, lShoulderDir, deltaPelvis);
+    applyInheritedKinematics(avatarBones.leftElbow, restDirs.leftElbow, lElbowDir, deltaPelvis);
+    applyInheritedKinematics(avatarBones.rightShoulder, restDirs.rightShoulder, rShoulderDir, deltaPelvis);
+    applyInheritedKinematics(avatarBones.rightElbow, restDirs.rightElbow, rElbowDir, deltaPelvis);
     
-    applyInheritedKinematics(avatarBones.leftHip, restDirs.leftHip, hL, kL, deltaPelvis);
-    applyInheritedKinematics(avatarBones.leftKnee, restDirs.leftKnee, kL, aL, deltaPelvis);
-    applyInheritedKinematics(avatarBones.rightHip, restDirs.rightHip, hR, kR, deltaPelvis);
-    applyInheritedKinematics(avatarBones.rightKnee, restDirs.rightKnee, kR, aR, deltaPelvis);
+    applyInheritedKinematics(avatarBones.leftHip, restDirs.leftHip, lHipDir, deltaPelvis);
+    applyInheritedKinematics(avatarBones.leftKnee, restDirs.leftKnee, lKneeDir, deltaPelvis);
+    applyInheritedKinematics(avatarBones.rightHip, restDirs.rightHip, rHipDir, deltaPelvis);
+    applyInheritedKinematics(avatarBones.rightKnee, restDirs.rightKnee, rKneeDir, deltaPelvis);
 
     skinnedMeshes.forEach(mesh => {
         if (mesh.skeleton) mesh.skeleton.update();
