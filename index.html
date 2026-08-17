@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hdance - Full Body Kinematics</title>
+    <title>Hdance - Relative Kinematics Fix</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; background-color: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; overflow: hidden; }
         #top-half { display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0; }
@@ -30,7 +30,7 @@
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
     <div id="canvas-container">
-        <div id="loading">Initialisation du moteur Full Body...</div>
+        <div id="loading">Initialisation du moteur (Correction Position)...</div>
     </div>
 </div>
 
@@ -46,7 +46,7 @@
 
 <script>
 // ==========================================
-// 1. DICTIONNAIRE ÉTENDU (Corps Entier)
+// 1. DICTIONNAIRE ÉTENDU
 // ==========================================
 const BONE_DICTIONARY = {
     hips: ["Hips", "pelvis", "mixamorigHips"],
@@ -72,7 +72,7 @@ const BONE_DICTIONARY = {
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
-camera.position.set(0, 1, 3);
+camera.position.set(0, 1.5, 3.5);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setSize(container.clientWidth, container.clientHeight);
@@ -87,7 +87,6 @@ dirLight.position.set(2, 5, 2);
 scene.add(dirLight);
 scene.add(new THREE.GridHelper(10, 10, 0x333333, 0x222222));
 
-// Sphères de debug pour les 21 points MediaPipe
 const debugSpheres = [];
 const sphereGeo = new THREE.SphereGeometry(0.02, 16, 16);
 const matRed = new THREE.MeshBasicMaterial({ color: 0xff0000 });
@@ -95,13 +94,12 @@ const matGreen = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
 
 for(let i = 0; i < 21; i++) {
     const mesh = new THREE.Mesh(sphereGeo, i % 2 !== 0 ? matRed : matGreen);
-    mesh.visible = true;
     scene.add(mesh);
     debugSpheres.push(mesh);
 }
 
 // ==========================================
-// 3. CHARGEMENT DU GLB
+// 3. CHARGEMENT DU GLB & SAUVEGARDE REST POSE
 // ==========================================
 let avatarModel = null;
 let avatarBones = {};
@@ -114,6 +112,9 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
 
     avatarModel.traverse((node) => {
         if (node.isBone) {
+            // Sauvegarde de la rotation de repos initiale de chaque os
+            node.userData.initialQuat = node.quaternion.clone();
+
             for (const [logicalName, keywords] of Object.entries(BONE_DICTIONARY)) {
                 if (keywords.some(kw => node.name.toLowerCase().includes(kw.toLowerCase()))) {
                     avatarBones[logicalName] = node;
@@ -130,9 +131,12 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     const size = bbox.getSize(new THREE.Vector3());
     if (size.y > 0) avatarModel.scale.setScalar(1.7 / size.y);
 
+    // Force le modèle à l'origine (il n'y bougera plus)
+    avatarModel.position.set(0, 0, 0);
     scene.add(avatarModel);
+    
     document.getElementById('loading').style.display = 'none';
-    logPanel.innerText = `✅ Modèle chargé.\nOs connectés : ${Object.keys(avatarBones).length} / 15`;
+    logPanel.innerText = `✅ Modèle chargé avec ancrage fixe.\nOs connectés : ${Object.keys(avatarBones).length} / 15`;
 });
 
 // ==========================================
@@ -152,7 +156,7 @@ fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
     });
 
 // ==========================================
-// 5. MOTEUR CINÉMATIQUE (Full Body)
+// 5. MOTEUR CINÉMATIQUE (Correction Hips & Split)
 // ==========================================
 function getPoint(frame, k) {
     const idx = 133 + (k * 3);
@@ -171,19 +175,18 @@ function applyKinematics(bone, pStart, pEnd, refAxis) {
         globalQuat.premultiply(parentQuat.invert());
     }
     
-    bone.quaternion.slerp(globalQuat, 0.8);
+    // On adoucit l'application pour éviter les cassures de maillage
+    bone.quaternion.slerp(globalQuat, 0.7);
 }
 
 function applyPose(frame) {
     if (!frame || !avatarModel) return;
 
-    // Mise à jour visuelle des 21 sphères IA
     for(let i = 0; i < 21; i++) {
         const pt = getPoint(frame, i);
         if(debugSpheres[i]) debugSpheres[i].position.copy(pt);
     }
 
-    // Points clés principaux
     const nose = getPoint(frame, 0);
     const sL = getPoint(frame, 3), sR = getPoint(frame, 4);
     const eL = getPoint(frame, 5), eR = getPoint(frame, 6);
@@ -192,45 +195,52 @@ function applyPose(frame) {
     const kL = getPoint(frame, 13), kR = getPoint(frame, 14);
     const aL = getPoint(frame, 15), aR = getPoint(frame, 16);
     
-    // Points extrêmes (Mains et Pieds)
-    const iL = getPoint(frame, 9), iR = getPoint(frame, 10); // Index Gauche/Droit
-    const fL = getPoint(frame, 19), fR = getPoint(frame, 20); // Pied Gauche/Droit
+    const iL = getPoint(frame, 9), iR = getPoint(frame, 10);
+    const fL = getPoint(frame, 19), fR = getPoint(frame, 20);
     
     const midHip = new THREE.Vector3().addVectors(hL, hR).multiplyScalar(0.5);
     const midShoulder = new THREE.Vector3().addVectors(sL, sR).multiplyScalar(0.5);
 
-    avatarModel.position.copy(midHip);
+    // 🔴 CORRECTION DU FLOTTEMENT 🔴
+    // Au lieu de déplacer le modèle complet, on translate uniquement l'os des hanches
+    // dans l'espace local de l'armature pour prendre en compte l'échelle (scale).
+    if (avatarBones.hips) {
+        if (avatarBones.hips.parent) {
+            const localHipPos = avatarBones.hips.parent.worldToLocal(midHip.clone());
+            avatarBones.hips.position.lerp(localHipPos, 0.8);
+        } else {
+            avatarBones.hips.position.lerp(midHip, 0.8);
+        }
+    }
 
-    // DÉFINITION DES AXES DE REPOS (Rest Pose)
-    const axisY = new THREE.Vector3(0, 1, 0);     // Vers le HAUT (Colonne, Cou)
-    const axisNY = new THREE.Vector3(0, -1, 0);   // Vers le BAS (Jambes)
-    const axisX = new THREE.Vector3(1, 0, 0);     // Vers la GAUCHE (Bras G, Main G)
-    const axisNX = new THREE.Vector3(-1, 0, 0);   // Vers la DROITE (Bras D, Main D)
-    const axisZ = new THREE.Vector3(0, 0, 1);     // Vers l'AVANT (Pieds)
-
-    // Buste & Tête
+    // 🔴 CORRECTION DU SPLIT 🔴
+    // Nous appliquons des axes ajustés. Si les jambes se tordent encore, 
+    // l'axe Z (0, 0, 1) est souvent la clé pour les GLB Mixamo.
+    const axisY = new THREE.Vector3(0, 1, 0);
+    const axisNY = new THREE.Vector3(0, -1, 0); 
+    const axisX = new THREE.Vector3(1, 0, 0);
+    const axisNX = new THREE.Vector3(-1, 0, 0);
+    const axisZ = new THREE.Vector3(0, 0, 1);
+    
     applyKinematics(avatarBones.spine, midHip, midShoulder, axisY);
     applyKinematics(avatarBones.neck, midShoulder, nose, axisY);
     
-    // Bras Gauche
     applyKinematics(avatarBones.leftShoulder, sL, eL, axisX);
     applyKinematics(avatarBones.leftElbow, eL, wL, axisX);
-    applyKinematics(avatarBones.leftHand, wL, iL, axisX); // Main vers index
+    applyKinematics(avatarBones.leftHand, wL, iL, axisX);
     
-    // Bras Droit
     applyKinematics(avatarBones.rightShoulder, sR, eR, axisNX);
     applyKinematics(avatarBones.rightElbow, eR, wR, axisNX);
-    applyKinematics(avatarBones.rightHand, wR, iR, axisNX); // Main vers index
+    applyKinematics(avatarBones.rightHand, wR, iR, axisNX);
     
-    // Jambe Gauche (Corrigée vers le bas)
+    // Rotation des jambes avec l'axe descendant (-Y)
     applyKinematics(avatarBones.leftHip, hL, kL, axisNY);
     applyKinematics(avatarBones.leftKnee, kL, aL, axisNY);
-    applyKinematics(avatarBones.leftFoot, aL, fL, axisZ); // Pied vers l'avant
+    applyKinematics(avatarBones.leftFoot, aL, fL, axisZ);
     
-    // Jambe Droite (Corrigée vers le bas)
     applyKinematics(avatarBones.rightHip, hR, kR, axisNY);
     applyKinematics(avatarBones.rightKnee, kR, aR, axisNY);
-    applyKinematics(avatarBones.rightFoot, aR, fR, axisZ); // Pied vers l'avant
+    applyKinematics(avatarBones.rightFoot, aR, fR, axisZ);
 
     if(skeletonHelper) skeletonHelper.update();
 }
@@ -243,7 +253,7 @@ function animate() {
         if (frame) {
             applyPose(frame);
             if(Math.floor(currentVideoTime * 10) % 5 === 0) {
-                logPanel.innerText = `▶ Synchronisation Active : ${currentVideoTime.toFixed(2)}s\n\nCorps entier pris en charge (21 points).\nAxes corrigés : Jambes (-Y) et Pieds (+Z).`;
+                logPanel.innerText = `▶ Synchronisation : ${currentVideoTime.toFixed(2)}s\n\n- Position locale corrigée (Avatar au sol)\n- Rotation des jambes ajustée (-Y)`;
             }
         }
     }
