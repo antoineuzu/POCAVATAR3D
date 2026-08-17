@@ -3,19 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hdance - Overlay Vidéo & Chrono Interne</title>
+    <title>Hdance - Single Timeline Synchronization</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; background-color: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; overflow: hidden; }
         
         /* SYSTÈME D'OVERLAY (SUPERPOSITION) */
         #main-view { flex: 1; position: relative; background: #000; display: flex; justify-content: center; align-items: center; overflow: hidden; }
         
-        /* La vidéo en fond */
         #video-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
         iframe { width: 100%; height: 100%; border: none; pointer-events: auto; }
         
         /* Le Canvas 3D par-dessus (transparent) */
-        #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; /* Laisse passer les clics vers la vidéo */ }
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; }
         
         #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #00ffcc; font-weight: bold; text-align: center; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 8px; border: 1px solid #00ffcc; z-index: 10;}
         
@@ -23,11 +22,10 @@
         #controls-panel { width: 300px; padding: 15px; border-right: 2px solid #333; display: flex; flex-direction: column; gap: 10px; }
         .btn-action { background: #00ffcc; color: #000; padding: 10px; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; pointer-events: auto; }
         .btn-action:hover { background: #00cca3; }
-        #log-panel { flex: 1; padding: 15px; overflow-y: auto; font-family: monospace; font-size: 12px; color: #0f0; white-space: pre-wrap; line-height: 1.4; background: #050505;}
+        #log-panel { flex: 1; padding: 15px; overflow-y: auto; font-family: monospace; font-size: 13px; color: #0f0; white-space: pre-wrap; line-height: 1.4; background: #050505;}
     </style>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
     <script src="https://embed.cloudflarestream.com/embed/sdk.latest.js"></script>
 </head>
@@ -38,18 +36,18 @@
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
     <div id="canvas-container">
-        <div id="loading">Chargement et fusion des vues...</div>
+        <div id="loading">Chargement du modèle et synchronisation vidéo...</div>
     </div>
 </div>
 
 <div id="bottom-half">
     <div id="controls-panel">
         <h3 style="margin:0; color:#fff;">⚙️ Contrôles</h3>
-        <button id="btn-force-play" class="btn-action">▶ Démarrer le Moteur 3D</button>
-        <button id="btn-debug-skeleton" class="btn-action" style="background:#ffaa00; color:#000;">🦴 Afficher Lignes Squelette</button>
-        <p style="font-size: 10px; color: #aaa;">Astuce : Lancez la vidéo, puis cliquez sur "Démarrer le Moteur 3D" en même temps.</p>
+        <p style="font-size: 11px; color: #aaa; margin: 0;">Utilisez les contrôles directement sur la vidéo pour naviguer.</p>
+        <button id="btn-debug-skeleton" class="btn-action" style="background:#ffaa00; color:#000; margin-top: 10px;">🦴 Afficher Lignes Squelette</button>
+        <button id="btn-toggle-mesh" class="btn-action" style="background:#444; color:#fff;">👻 Masquer la peau 3D</button>
     </div>
-    <div id="log-panel">Attente du système...</div>
+    <div id="log-panel">Attente de la connexion avec le lecteur Cloudflare...</div>
 </div>
 
 <script>
@@ -71,18 +69,13 @@ const BONE_DICTIONARY = {
 // ==========================================
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
-// Caméra calée pour correspondre à peu près à la vue vidéo
 const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
 camera.position.set(0, 1.0, 3.5);
 
-// Alpha: true permet de voir la vidéo au travers !
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setSize(container.clientWidth, container.clientHeight);
-renderer.setClearColor(0x000000, 0); // Fond 100% transparent
+renderer.setClearColor(0x000000, 0); 
 container.appendChild(renderer.domElement);
-
-// On désactive OrbitControls car on veut un calque fixe sur la vidéo
-// const controls = new THREE.OrbitControls(camera, renderer.domElement);
 
 scene.add(new THREE.AmbientLight(0xffffff, 1.5));
 const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
@@ -90,7 +83,7 @@ dirLight.position.set(0, 5, 5);
 scene.add(dirLight);
 
 // ==========================================
-// 3. VARIABLES DE SYNCHRONISATION
+// 3. VARIABLES GLOBALES
 // ==========================================
 let avatarModel = null;
 let avatarBones = {};
@@ -137,7 +130,7 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     const size = bbox.getSize(new THREE.Vector3());
     if (size.y > 0) avatarModel.scale.setScalar(1.8 / size.y);
 
-    avatarModel.position.set(0, -0.8, 0); // Décalage vers le bas pour matcher l'acteur
+    avatarModel.position.set(0, -0.8, 0); 
     scene.add(avatarModel);
     
     isModelReady = true;
@@ -194,7 +187,7 @@ function extractRestDirections() {
     restDirs.rightKnee = new THREE.Vector3().subVectors(getWPos(avatarBones.rightFoot), getWPos(avatarBones.rightKnee)).normalize();
     
     document.getElementById('loading').style.display = 'none';
-    logPanel.innerText = `✅ Overlay prêt.\nCliquez sur "Démarrer le Moteur 3D" pour forcer l'animation.`;
+    logPanel.innerText = `✅ Synchronisation établie.\nLancez ou déplacez le curseur de la vidéo : l'avatar suivra instantanément !`;
 }
 
 function checkAutoStart() {
@@ -205,29 +198,44 @@ function checkAutoStart() {
 }
 
 // ==========================================
-// 6. CHRONOMÈTRE INTERNE (Anti-Freeze)
+// 6. SYNCHRONISATION EXACTE (TIMELINE HYBRIDE)
 // ==========================================
-let isEngineRunning = false;
-let engineStartTime = 0;
-let simulatedVideoTime = 0;
+let currentVideoTime = 0;
+let isVideoPlaying = false;
+let lastSyncRealTime = performance.now();
+const player = Stream(document.getElementById('stream-player'));
 
-document.getElementById('btn-force-play').addEventListener('click', (e) => {
-    isEngineRunning = !isEngineRunning;
-    if (isEngineRunning) {
-        engineStartTime = Date.now() - (simulatedVideoTime * 1000);
-        e.target.innerText = "⏸ Mettre en pause 3D";
-        logPanel.innerText = `▶ Moteur 3D forcé en marche !`;
-    } else {
-        e.target.innerText = "▶ Démarrer le Moteur 3D";
-    }
+player.addEventListener('playing', () => { 
+    isVideoPlaying = true; 
+    lastSyncRealTime = performance.now();
+    logPanel.innerText = "▶ Lecture vidéo en cours...";
+});
+
+player.addEventListener('pause', () => { 
+    isVideoPlaying = false; 
+    logPanel.innerText = `⏸ Vidéo en pause à ${currentVideoTime.toFixed(2)}s`;
+});
+
+// Écoute le lecteur vidéo qui nous donne son temps réel
+player.addEventListener('timeupdate', () => { 
+    player.currentTime.then(time => {
+        currentVideoTime = time;
+        lastSyncRealTime = performance.now(); // Réinitialise l'extrapolateur
+        
+        // Si la vidéo est en pause (quand l'utilisateur scrolle la timeline manuellement)
+        if (!isVideoPlaying) {
+            const frame = posesData.find(p => Math.abs(p[0] - currentVideoTime) < 0.04) || posesData[Math.floor(currentVideoTime * 25) % posesData.length];
+            if (frame) applyPose(frame);
+            logPanel.innerText = `⏱ Navigation manuelle à ${currentVideoTime.toFixed(2)}s`;
+        }
+    });
 });
 
 // ==========================================
-// 7. MOTEUR CINÉMATIQUE SANS LAG
+// 7. MOTEUR CINÉMATIQUE 
 // ==========================================
 function getPoint(frame, k) {
     const idx = 133 + (k * 3);
-    // On inverse X pour faire un effet miroir superposé parfait
     return new THREE.Vector3(-frame[idx], -frame[idx+1], -frame[idx+2]);
 }
 
@@ -314,19 +322,18 @@ function applyPose(frame) {
 function animate() {
     requestAnimationFrame(animate);
     
-    if (posesData.length > 0 && isEngineRunning) {
-        // Horloge pur JS, indépendante de la vidéo !
-        simulatedVideoTime = (Date.now() - engineStartTime) / 1000;
+    if (posesData.length > 0 && isModelReady) {
+        let displayTime = currentVideoTime;
         
-        const frame = posesData.find(p => Math.abs(p[0] - simulatedVideoTime) < 0.04) || posesData[Math.floor(simulatedVideoTime * 25) % posesData.length];
-        
-        if (frame) {
-            applyPose(frame);
-            if (Math.floor(simulatedVideoTime * 10) % 5 === 0) {
-                logPanel.innerText = `▶ Moteur Actif : ${simulatedVideoTime.toFixed(2)}s`;
-            }
+        // Extrapolation de haute précision pendant la lecture
+        if (isVideoPlaying) {
+            displayTime += (performance.now() - lastSyncRealTime) / 1000;
         }
+        
+        const frame = posesData.find(p => Math.abs(p[0] - displayTime) < 0.04) || posesData[Math.floor(displayTime * 25) % posesData.length];
+        if (frame) applyPose(frame);
     }
+    
     renderer.render(scene, camera);
 }
 animate();
@@ -341,7 +348,13 @@ document.getElementById('btn-debug-skeleton').addEventListener('click', (e) => {
     }
 });
 
-// Gérer le redimensionnement pour l'overlay
+let showMesh = true;
+document.getElementById('btn-toggle-mesh').addEventListener('click', (e) => {
+    showMesh = !showMesh;
+    skinnedMeshes.forEach(m => m.visible = showMesh);
+    e.target.innerText = showMesh ? "👻 Afficher la peau 3D" : "👻 Masquer la peau 3D";
+});
+
 window.addEventListener('resize', () => {
     camera.aspect = container.clientWidth / container.clientHeight;
     camera.updateProjectionMatrix();
