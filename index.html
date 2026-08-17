@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hdance - Stabilisation Chevilles & Talons</title>
+    <title>Hdance - Flat Foot Grounding & Sync</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; background-color: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; overflow: hidden; }
         #top-half { display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0; }
@@ -30,14 +30,14 @@
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
     <div id="canvas-container">
-        <div id="loading">Stabilisation des chevilles & calage des pieds au sol...</div>
+        <div id="loading">Plaquage strict des talons et de la plante du pied au sol...</div>
     </div>
 </div>
 
 <div id="bottom-half">
     <div id="controls-panel">
         <h3 style="margin:0; color:#fff;">⚙️ Contrôles</h3>
-        <p style="font-size: 11px; color: #aaa; margin: 0;">Pieds stabilisés à plat. Talons verrouillés sur Y=0.</p>
+        <p style="font-size: 11px; color: #aaa; margin: 0;">Pieds forcés à plat sur Y=0. Annulation de l'inclinaison des chevilles.</p>
         <button id="btn-debug-skeleton" class="btn-action" style="background:#ffaa00; color:#000; margin-top: 10px;">🦴 Afficher Lignes Squelette</button>
         <button id="btn-toggle-mesh" class="btn-action" style="background:#444; color:#fff;">👻 Masquer la peau 3D</button>
     </div>
@@ -201,7 +201,7 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
 
     avatarModel.updateMatrixWorld(true);
     
-    // Aligne la plante des pieds sur Y = 0
+    // Aligne la semelle du modèle sur Y = 0
     const scaledBbox = new THREE.Box3().setFromObject(avatarModel);
     avatarModel.position.set(0, -scaledBbox.min.y, 0); 
     avatarModel.updateMatrixWorld(true);
@@ -298,7 +298,7 @@ function extractRestDirections() {
     restDirs.rightKnee = new THREE.Vector3().subVectors(getWPos(avatarBones.rightFoot), getWPos(avatarBones.rightKnee)).normalize();
     
     document.getElementById('loading').style.display = 'none';
-    logPanel.innerText = `✅ Chevilles stabilisées.\nPieds plaqués à plat sur le sol.`;
+    logPanel.innerText = `✅ Correction géométrique des chevilles active.\nTalons et plante du pied stabilisés à plat.`;
 }
 
 function checkAutoStart() {
@@ -337,7 +337,7 @@ player.addEventListener('timeupdate', () => {
 });
 
 // ==========================================
-// 7. CINÉMATIQUE & COMPENSATION DE CHEVILLE
+// 7. CINÉMATIQUE & ALIGNEMENT DU PIED À PLAT
 // ==========================================
 function applyInheritedKinematics(bone, restDir, targetDir, rootDeltaQuat) {
     if (!bone || !restDir || !targetDir || !rootDeltaQuat) return;
@@ -362,17 +362,22 @@ function applyInheritedKinematics(bone, restDir, targetDir, rootDeltaQuat) {
     bone.updateMatrixWorld(true);
 }
 
-// Aligne la cheville pour que la plante du pied reste parallèle au sol
-function alignFootToGround(footBone, calfBone) {
-    if (!footBone || !calfBone) return;
+// 🔴 ALIGNE LE PIED HORIZONTALEMENT (Annule la rotation du mollet)
+function alignFootToGround(footBone) {
+    if (!footBone || !footBone.parent) return;
     
-    // Annule la rotation du mollet sur l'axe X pour garder la semelle à plat
-    const calfQuat = new THREE.Quaternion();
-    calfBone.getWorldQuaternion(calfQuat);
+    footBone.parent.updateMatrixWorld(true);
+    const parentWorldQuat = new THREE.Quaternion();
+    footBone.parent.getWorldQuaternion(parentWorldQuat);
     
-    // Inversion de l'inclinaison locale pour compenser la flexion du genou
-    const identityQuat = new THREE.Quaternion();
-    footBone.quaternion.slerp(identityQuat, 0.2);
+    // Le pied veut rester horizontal dans le monde (Quaternion Identité)
+    const targetWorldQuat = new THREE.Quaternion(); 
+    
+    // Transforme la rotation mondiale voulue vers le repère local de la cheville
+    const targetLocalQuat = parentWorldQuat.invert().multiply(targetWorldQuat);
+    
+    footBone.quaternion.slerp(targetLocalQuat, 0.4);
+    footBone.updateMatrixWorld(true);
 }
 
 function applyPose(frame) {
@@ -461,9 +466,9 @@ function applyPose(frame) {
     applyInheritedKinematics(avatarBones.rightHip, restDirs.rightHip, rHipDir, deltaPelvis);
     applyInheritedKinematics(avatarBones.rightKnee, restDirs.rightKnee, rKneeDir, deltaPelvis);
 
-    // Stabilisation dynamique des pieds à plat
-    alignFootToGround(avatarBones.leftFoot, avatarBones.leftKnee);
-    alignFootToGround(avatarBones.rightFoot, avatarBones.rightKnee);
+    // 🔴 FORCE LE PIED À RESTATIONNER À PLAT
+    alignFootToGround(avatarBones.leftFoot);
+    alignFootToGround(avatarBones.rightFoot);
 
     skinnedMeshes.forEach(mesh => {
         if (mesh.skeleton) mesh.skeleton.update();
