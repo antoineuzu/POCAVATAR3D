@@ -3,18 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hdance - Single Timeline Synchronization</title>
+    <title>Hdance - Split Screen & Perfect Sync</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; background-color: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; overflow: hidden; }
         
-        /* SYSTÈME D'OVERLAY (SUPERPOSITION) */
-        #main-view { flex: 1; position: relative; background: #000; display: flex; justify-content: center; align-items: center; overflow: hidden; }
+        /* RETOUR AU MODE 2 ZONES SÉPARÉES */
+        #top-half { display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0; }
+        #video-container { flex: 1; background: #000; border-right: 2px solid #333; }
+        iframe { width: 100%; height: 100%; border: none; }
         
-        #video-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
-        iframe { width: 100%; height: 100%; border: none; pointer-events: auto; }
-        
-        /* Le Canvas 3D par-dessus (transparent) */
-        #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; }
+        #canvas-container { flex: 1; position: relative; background: #1a1a1a; }
         
         #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #00ffcc; font-weight: bold; text-align: center; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 8px; border: 1px solid #00ffcc; z-index: 10;}
         
@@ -26,12 +24,13 @@
     </style>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
     <script src="https://embed.cloudflarestream.com/embed/sdk.latest.js"></script>
 </head>
 <body>
 
-<div id="main-view">
+<div id="top-half">
     <div id="video-container">
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
@@ -43,7 +42,7 @@
 <div id="bottom-half">
     <div id="controls-panel">
         <h3 style="margin:0; color:#fff;">⚙️ Contrôles</h3>
-        <p style="font-size: 11px; color: #aaa; margin: 0;">Utilisez les contrôles directement sur la vidéo pour naviguer.</p>
+        <p style="font-size: 11px; color: #aaa; margin: 0;">Utilisez les contrôles de la vidéo. Tournez la caméra 3D avec la souris.</p>
         <button id="btn-debug-skeleton" class="btn-action" style="background:#ffaa00; color:#000; margin-top: 10px;">🦴 Afficher Lignes Squelette</button>
         <button id="btn-toggle-mesh" class="btn-action" style="background:#444; color:#fff;">👻 Masquer la peau 3D</button>
     </div>
@@ -65,22 +64,28 @@ const BONE_DICTIONARY = {
 };
 
 // ==========================================
-// 2. SCÈNE 3D (TRANSPARENTE)
+// 2. SCÈNE 3D
 // ==========================================
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
-camera.position.set(0, 1.0, 3.5);
+camera.position.set(0, 1.5, 4.0);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setSize(container.clientWidth, container.clientHeight);
-renderer.setClearColor(0x000000, 0); 
 container.appendChild(renderer.domElement);
+
+// Réactivation des contrôles de caméra (OrbitControls)
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1.0, 0);
 
 scene.add(new THREE.AmbientLight(0xffffff, 1.5));
 const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
-dirLight.position.set(0, 5, 5);
+dirLight.position.set(2, 5, 5);
 scene.add(dirLight);
+
+// Ajout de la grille au sol pour mieux visualiser l'espace
+scene.add(new THREE.GridHelper(10, 10, 0x333333, 0x222222));
 
 // ==========================================
 // 3. VARIABLES GLOBALES
@@ -130,7 +135,8 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     const size = bbox.getSize(new THREE.Vector3());
     if (size.y > 0) avatarModel.scale.setScalar(1.8 / size.y);
 
-    avatarModel.position.set(0, -0.8, 0); 
+    // Repositionnement normal au centre de la scène
+    avatarModel.position.set(0, 0, 0); 
     scene.add(avatarModel);
     
     isModelReady = true;
@@ -187,7 +193,7 @@ function extractRestDirections() {
     restDirs.rightKnee = new THREE.Vector3().subVectors(getWPos(avatarBones.rightFoot), getWPos(avatarBones.rightKnee)).normalize();
     
     document.getElementById('loading').style.display = 'none';
-    logPanel.innerText = `✅ Synchronisation établie.\nLancez ou déplacez le curseur de la vidéo : l'avatar suivra instantanément !`;
+    logPanel.innerText = `✅ Synchronisation établie en mode 2 zones.\nLancez ou déplacez le curseur de la vidéo : l'avatar suivra instantanément !`;
 }
 
 function checkAutoStart() {
@@ -220,9 +226,8 @@ player.addEventListener('pause', () => {
 player.addEventListener('timeupdate', () => { 
     player.currentTime.then(time => {
         currentVideoTime = time;
-        lastSyncRealTime = performance.now(); // Réinitialise l'extrapolateur
+        lastSyncRealTime = performance.now();
         
-        // Si la vidéo est en pause (quand l'utilisateur scrolle la timeline manuellement)
         if (!isVideoPlaying) {
             const frame = posesData.find(p => Math.abs(p[0] - currentVideoTime) < 0.04) || posesData[Math.floor(currentVideoTime * 25) % posesData.length];
             if (frame) applyPose(frame);
@@ -236,7 +241,8 @@ player.addEventListener('timeupdate', () => {
 // ==========================================
 function getPoint(frame, k) {
     const idx = 133 + (k * 3);
-    return new THREE.Vector3(-frame[idx], -frame[idx+1], -frame[idx+2]);
+    // Suppression de l'inversion X (utilisée uniquement pour l'overlay)
+    return new THREE.Vector3(frame[idx], -frame[idx+1], -frame[idx+2]);
 }
 
 function applyInheritedKinematics(bone, restDir, pStart, pEnd, rootDeltaQuat) {
@@ -334,6 +340,7 @@ function animate() {
         if (frame) applyPose(frame);
     }
     
+    controls.update(); // Mise à jour de la caméra (OrbitControls)
     renderer.render(scene, camera);
 }
 animate();
