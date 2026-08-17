@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hdance - Grounding & Anti-Jitter Filter</title>
+    <title>Hdance - Scaled Motion & Precision Anchoring</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; background-color: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; overflow: hidden; }
         #top-half { display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0; }
@@ -30,14 +30,14 @@
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
     <div id="canvas-container">
-        <div id="loading">Initialisation de l'ancrage au sol et du filtre anti-tremblement...</div>
+        <div id="loading">Étalonnage des amplitudes de déplacement...</div>
     </div>
 </div>
 
 <div id="bottom-half">
     <div id="controls-panel">
         <h3 style="margin:0; color:#fff;">⚙️ Contrôles</h3>
-        <p style="font-size: 11px; color: #aaa; margin: 0;">Ancrage sur les points les plus bas + Lissage temporel actif.</p>
+        <p style="font-size: 11px; color: #aaa; margin: 0;">Amplitudes réduites & Amortissement stabilisé.</p>
         <button id="btn-debug-skeleton" class="btn-action" style="background:#ffaa00; color:#000; margin-top: 10px;">🦴 Afficher Lignes Squelette</button>
         <button id="btn-toggle-mesh" class="btn-action" style="background:#444; color:#fff;">👻 Masquer la peau 3D</button>
     </div>
@@ -162,11 +162,11 @@ let basePelvisQuat = null;
 let baseLowestPoint2D = null;
 let baseModelPos = null;
 
-// FACTEUR DE LISSAGE (Anti-Tremblement) : 0.15 = Ultra fluide, 0.5 = Plus réactif
-const SMOOTH_FACTOR = 0.2; 
+// FACTEUR DE LISSAGE (Anti-Tremblement & Amortissement)
+const SMOOTH_FACTOR = 0.15; 
 
 // ==========================================
-// 4. CHARGEMENT ASYNCHRONE & POSITIONNEMENT
+// 4. CHARGEMENT ASYNCHRONE & ANCRAGE
 // ==========================================
 new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     avatarModel = gltf.scene;
@@ -195,14 +195,11 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     skeletonHelper.visible = false;
     scene.add(skeletonHelper);
 
-    // Ajustement de la taille globale du personnage
     const initialBbox = new THREE.Box3().setFromObject(avatarModel);
     const size = initialBbox.getSize(new THREE.Vector3());
     if (size.y > 0) avatarModel.scale.setScalar(1.75 / size.y);
 
     avatarModel.updateMatrixWorld(true);
-    
-    // Aligne le bas absolu du maillage (les semelles) sur Y = 0 (Le sol)
     const scaledBbox = new THREE.Box3().setFromObject(avatarModel);
     avatarModel.position.set(0, -scaledBbox.min.y, 0); 
     avatarModel.updateMatrixWorld(true);
@@ -222,7 +219,7 @@ fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
     });
 
 // ==========================================
-// 5. MATHÉMATIQUES & EXTRACTION DES PIEDS
+// 5. MATHÉMATIQUES & REPERES
 // ==========================================
 
 function getPoint(frame, k) {
@@ -244,11 +241,10 @@ function getWPos(bone) {
     return p;
 }
 
-// Recherche dynamique du point le plus bas du corps à l'écran (Chevilles/Pieds)
 function getLowestPoint2D(frame) {
     const footIndices = [15, 16, 27, 28, 29, 30, 31, 32];
     let lowestPt = null;
-    let maxY = -Infinity; // En 2D écran, Y augmente vers le bas
+    let maxY = -Infinity;
 
     footIndices.forEach(idx => {
         const pt = getScreenPoint(frame, idx);
@@ -259,7 +255,6 @@ function getLowestPoint2D(frame) {
     });
 
     if (!lowestPt) {
-        // Fallback sur les chevilles si pas d'autres points
         const aL = getScreenPoint(frame, 15);
         const aR = getScreenPoint(frame, 16);
         lowestPt = aL.y > aR.y ? aL : aR;
@@ -285,11 +280,8 @@ function extractRestDirections() {
 
     basePelvisQuat = computeRootBasis(hL, hR);
 
-    // 🔴 ANCRAGE DU POINT LE PLUS BAS DU CORPS À LA FRAME 0
     const frame0 = posesData[0];
     baseLowestPoint2D = getLowestPoint2D(frame0);
-    
-    // Garde en mémoire la position de départ (Pieds sur le sol 3D)
     baseModelPos = avatarModel.position.clone();
 
     restDirs.spine = new THREE.Vector3().subVectors(midShoulder, midHip).normalize();
@@ -304,7 +296,7 @@ function extractRestDirections() {
     restDirs.rightKnee = new THREE.Vector3().subVectors(getWPos(avatarBones.rightFoot), getWPos(avatarBones.rightKnee)).normalize();
     
     document.getElementById('loading').style.display = 'none';
-    logPanel.innerText = `✅ Ancrage sol configuré sur les pieds MediaPipe.\nFiltre anti-tremblement activé.`;
+    logPanel.innerText = `✅ Amplitudes ajustées.\nDéplacements réalistes en cours.`;
 }
 
 function checkAutoStart() {
@@ -343,7 +335,7 @@ player.addEventListener('timeupdate', () => {
 });
 
 // ==========================================
-// 7. MOTEUR CINÉMATIQUE AVEC ANTI-TREMBLEMENT
+// 7. MOTEUR CINÉMATIQUE (Facteurs réduits)
 // ==========================================
 function applyInheritedKinematics(bone, restDir, targetDir, rootDeltaQuat) {
     if (!bone || !restDir || !targetDir || !rootDeltaQuat) return;
@@ -360,7 +352,6 @@ function applyInheritedKinematics(bone, restDir, targetDir, rootDeltaQuat) {
     if (bone.parent && bone.parent.isBone) {
         bone.parent.getWorldQuaternion(parentWorldQuat);
         const localQuat = parentWorldQuat.invert().multiply(targetWorldQuat);
-        // LISSAGE ROTATION (Slerp)
         bone.quaternion.slerp(localQuat, SMOOTH_FACTOR);
     } else {
         bone.quaternion.slerp(targetWorldQuat, SMOOTH_FACTOR);
@@ -372,20 +363,19 @@ function applyInheritedKinematics(bone, restDir, targetDir, rootDeltaQuat) {
 function applyPose(frame) {
     if (!frame || !avatarModel || !basePelvisQuat || !baseLowestPoint2D) return;
 
-    // 🔴 1. DÉPLACEMENT AVEC ANCRAGE PIEDS AU SOL
+    // 🔴 1. AMORTISSEMENT DES DÉPLACEMENTS SPATIAUX (Ratios calibrés)
     const currentLowestPoint2D = getLowestPoint2D(frame);
     const deltaScreen = currentLowestPoint2D.clone().sub(baseLowestPoint2D);
 
-    const ROOM_WIDTH = 4.5;
-    const ROOM_HEIGHT = 4.0;
-    const ROOM_DEPTH = 3.0;
+    const ROOM_WIDTH = 1.8;  // Réduit de 4.5 à 1.8 pour éviter les dérives latérales
+    const ROOM_HEIGHT = 1.2; // Réduit de 4.0 à 1.2 pour lisser la hauteur des sauts
+    const ROOM_DEPTH = 1.0;  // Réduit de 3.0 à 1.0 pour stabiliser la profondeur
 
     const targetModelPos = baseModelPos.clone();
     targetModelPos.x += deltaScreen.x * ROOM_WIDTH;
     targetModelPos.y += -deltaScreen.y * ROOM_HEIGHT; 
     targetModelPos.z += deltaScreen.z * ROOM_DEPTH;
 
-    // LISSAGE POSITION (Lerp Anti-Tremblement)
     avatarModel.position.lerp(targetModelPos, SMOOTH_FACTOR);
 
     // 🔴 2. ROTATION DES OS
@@ -418,11 +408,11 @@ function applyPose(frame) {
     }
 
     const spineDir = new THREE.Vector3().subVectors(midShoulder, midHip);
-    spineDir.z *= 0.3; 
+    spineDir.z *= 0.2; // Amorti accentué sur le dos
     spineDir.normalize();
 
     const neckDir = new THREE.Vector3().subVectors(nose, midShoulder);
-    neckDir.z *= 0.3;
+    neckDir.z *= 0.2;
     neckDir.normalize();
 
     const lShoulderDir = new THREE.Vector3().subVectors(eL, sL).normalize();
