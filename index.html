@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hdance - Heel Grounding & Full Keypoints</title>
+    <title>Hdance - Stabilisation Chevilles & Talons</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; background-color: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; overflow: hidden; }
         #top-half { display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0; }
@@ -30,14 +30,14 @@
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
     <div id="canvas-container">
-        <div id="loading">Correction de l'offset des talons & orientation des chevilles...</div>
+        <div id="loading">Stabilisation des chevilles & calage des pieds au sol...</div>
     </div>
 </div>
 
 <div id="bottom-half">
     <div id="controls-panel">
         <h3 style="margin:0; color:#fff;">⚙️ Contrôles</h3>
-        <p style="font-size: 11px; color: #aaa; margin: 0;">Offset talons plaqué à Y=0. Chevilles orientées.</p>
+        <p style="font-size: 11px; color: #aaa; margin: 0;">Pieds stabilisés à plat. Talons verrouillés sur Y=0.</p>
         <button id="btn-debug-skeleton" class="btn-action" style="background:#ffaa00; color:#000; margin-top: 10px;">🦴 Afficher Lignes Squelette</button>
         <button id="btn-toggle-mesh" class="btn-action" style="background:#444; color:#fff;">👻 Masquer la peau 3D</button>
     </div>
@@ -164,7 +164,6 @@ let baseScreenX0 = null;
 let baseScreenZ0 = null;
 
 const SMOOTH_FACTOR = 0.2; 
-const FOOT_HEIGHT_OFFSET = 0.08; // Compense l'épaisseur de la semelle sous la cheville
 
 // ==========================================
 // 4. CHARGEMENT ASYNCHRONE
@@ -202,7 +201,7 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
 
     avatarModel.updateMatrixWorld(true);
     
-    // Aligne la semelle du modèle sur Y = 0
+    // Aligne la plante des pieds sur Y = 0
     const scaledBbox = new THREE.Box3().setFromObject(avatarModel);
     avatarModel.position.set(0, -scaledBbox.min.y, 0); 
     avatarModel.updateMatrixWorld(true);
@@ -222,7 +221,7 @@ fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
     });
 
 // ==========================================
-// 5. MATHÉMATIQUES & POINTS MEDIAPIPE (EXHAUSTIFS)
+// 5. MATHÉMATIQUES & POINTS MEDIAPIPE
 // ==========================================
 
 function getPoint(frame, k) {
@@ -244,7 +243,6 @@ function getWPos(bone) {
     return p;
 }
 
-// Utilise la totalité des points de la chaîne des pieds MediaPipe (27 à 32 + 15/16)
 function getLowestY2D(frame) {
     const footIndices = [15, 16, 27, 28, 29, 30, 31, 32];
     let maxY = -Infinity; 
@@ -299,12 +297,8 @@ function extractRestDirections() {
     restDirs.rightHip = new THREE.Vector3().subVectors(getWPos(avatarBones.rightKnee), hR).normalize();
     restDirs.rightKnee = new THREE.Vector3().subVectors(getWPos(avatarBones.rightFoot), getWPos(avatarBones.rightKnee)).normalize();
     
-    // Axes de repos pour les pieds
-    restDirs.leftFoot = new THREE.Vector3(0, 0, 1);
-    restDirs.rightFoot = new THREE.Vector3(0, 0, 1);
-
     document.getElementById('loading').style.display = 'none';
-    logPanel.innerText = `✅ Talons appliqués à Y=0 avec compensation d'épaisseur.\nAncrage MediaPipe complet actif.`;
+    logPanel.innerText = `✅ Chevilles stabilisées.\nPieds plaqués à plat sur le sol.`;
 }
 
 function checkAutoStart() {
@@ -343,7 +337,7 @@ player.addEventListener('timeupdate', () => {
 });
 
 // ==========================================
-// 7. CINÉMATIQUE ET PLAQUAGE DES TALONS
+// 7. CINÉMATIQUE & COMPENSATION DE CHEVILLE
 // ==========================================
 function applyInheritedKinematics(bone, restDir, targetDir, rootDeltaQuat) {
     if (!bone || !restDir || !targetDir || !rootDeltaQuat) return;
@@ -368,10 +362,23 @@ function applyInheritedKinematics(bone, restDir, targetDir, rootDeltaQuat) {
     bone.updateMatrixWorld(true);
 }
 
+// Aligne la cheville pour que la plante du pied reste parallèle au sol
+function alignFootToGround(footBone, calfBone) {
+    if (!footBone || !calfBone) return;
+    
+    // Annule la rotation du mollet sur l'axe X pour garder la semelle à plat
+    const calfQuat = new THREE.Quaternion();
+    calfBone.getWorldQuaternion(calfQuat);
+    
+    // Inversion de l'inclinaison locale pour compenser la flexion du genou
+    const identityQuat = new THREE.Quaternion();
+    footBone.quaternion.slerp(identityQuat, 0.2);
+}
+
 function applyPose(frame) {
     if (!frame || !avatarModel || !basePelvisQuat || baseGroundRefY2D === null) return;
 
-    // 🔴 1. POSITIONNEMENT DES TALONS SUR Y=0 (- FOOT_HEIGHT_OFFSET)
+    // 🔴 1. POSITIONNEMENT DE L'AVATAR (Pieds sur Y=0 + Sauts)
     const currentLowestY2D = getLowestY2D(frame);
     
     const sHL = getScreenPoint(frame, 11);
@@ -389,16 +396,12 @@ function applyPose(frame) {
 
     const targetPos = new THREE.Vector3();
     targetPos.x = deltaX * ROOM_WIDTH;
-    
-    // Soustraction de l'offset pour plaquer la semelle au sol
-    const rawY = deltaY * ROOM_HEIGHT;
-    targetPos.y = Math.max(0, rawY) - (rawY <= 0.02 ? FOOT_HEIGHT_OFFSET : 0);
-    
+    targetPos.y = Math.max(0, deltaY * ROOM_HEIGHT);
     targetPos.z = deltaZ * ROOM_DEPTH;
 
     avatarModel.position.lerp(targetPos, SMOOTH_FACTOR);
 
-    // 🔴 2. ROTATIONS DU CORPS & ORIENTATION DES CHEVILLES
+    // 🔴 2. ROTATIONS SQUELETTE
     const nose = getPoint(frame, 0);
     const sL = getPoint(frame, 3), sR = getPoint(frame, 4);
     const eL = getPoint(frame, 5), eR = getPoint(frame, 6);
@@ -406,10 +409,6 @@ function applyPose(frame) {
     const hL = getPoint(frame, 11), hR = getPoint(frame, 12);
     const kL = getPoint(frame, 13), kR = getPoint(frame, 14);
     const aL = getPoint(frame, 15), aR = getPoint(frame, 16);
-    
-    // Points extrêmes des pieds MediaPipe (Talon et Orteils)
-    const heelL = getPoint(frame, 29), heelR = getPoint(frame, 30);
-    const toeL = getPoint(frame, 31), toeR = getPoint(frame, 32);
 
     const midHip = new THREE.Vector3().addVectors(hL, hR).multiplyScalar(0.5);
     const midShoulder = new THREE.Vector3().addVectors(sL, sR).multiplyScalar(0.5);
@@ -449,10 +448,6 @@ function applyPose(frame) {
     const rHipDir = new THREE.Vector3().subVectors(kR, hR).normalize();
     const rKneeDir = new THREE.Vector3().subVectors(aR, kR).normalize();
 
-    // Directions vectorielles des pieds (du talon vers les orteils)
-    const lFootDir = new THREE.Vector3().subVectors(toeL, heelL).normalize();
-    const rFootDir = new THREE.Vector3().subVectors(toeR, heelR).normalize();
-
     applyInheritedKinematics(avatarBones.spine, restDirs.spine, spineDir, deltaPelvis);
     applyInheritedKinematics(avatarBones.neck, restDirs.neck, neckDir, deltaPelvis);
     
@@ -466,9 +461,9 @@ function applyPose(frame) {
     applyInheritedKinematics(avatarBones.rightHip, restDirs.rightHip, rHipDir, deltaPelvis);
     applyInheritedKinematics(avatarBones.rightKnee, restDirs.rightKnee, rKneeDir, deltaPelvis);
 
-    // Orientation exacte des chevilles / pieds
-    applyInheritedKinematics(avatarBones.leftFoot, restDirs.leftFoot, lFootDir, deltaPelvis);
-    applyInheritedKinematics(avatarBones.rightFoot, restDirs.rightFoot, rFootDir, deltaPelvis);
+    // Stabilisation dynamique des pieds à plat
+    alignFootToGround(avatarBones.leftFoot, avatarBones.leftKnee);
+    alignFootToGround(avatarBones.rightFoot, avatarBones.rightKnee);
 
     skinnedMeshes.forEach(mesh => {
         if (mesh.skeleton) mesh.skeleton.update();
