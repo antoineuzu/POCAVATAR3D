@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hdance - Raycasting & Zero-Slide Mocap</title>
+    <title>Hdance - Fluid Hips & Cyber Studio</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; background-color: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; overflow: hidden; }
         #top-half { display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0; }
@@ -30,14 +30,14 @@
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
     <div id="canvas-container">
-        <div id="loading">Étalonnage optique de la caméra virtuelle...</div>
+        <div id="loading">Libération des articulations du bassin...</div>
     </div>
 </div>
 
 <div id="bottom-half">
     <div id="controls-panel">
         <h3 style="margin:0; color:#fff;">⚙️ Contrôles</h3>
-        <p style="font-size: 11px; color: #aaa; margin: 0;">Projection optique active. Glissements du sol éliminés.</p>
+        <p style="font-size: 11px; color: #aaa; margin: 0;">Déhanché 3D actif. Déplacements stabilisés pour caméra fixe.</p>
         <button id="btn-debug-skeleton" class="btn-action" style="background:#ffaa00; color:#000; margin-top: 10px;">🦴 Afficher Lignes Squelette</button>
         <button id="btn-toggle-mesh" class="btn-action" style="background:#444; color:#fff;">👻 Masquer la peau 3D</button>
     </div>
@@ -126,7 +126,7 @@ function buildFuturisticStudio() {
 buildFuturisticStudio();
 
 // ==========================================
-// 3. VARIABLES GLOBALES ET CAMÉRA VIRTUELLE
+// 3. VARIABLES GLOBALES
 // ==========================================
 let avatarModel = null;
 let avatarBones = {};
@@ -140,17 +140,13 @@ let isJsonReady = false;
 
 const restDirs = {};
 let basePelvisQuat = null;
+
 let baseGroundRefY2D = null;
-let baseProjectedHips = null;
+let baseScreenX0 = null;
+let baseMidHip3D_Z0 = null; // Référence 3D native pour la profondeur
 let baseModelPos = null;
 
-const SMOOTH_FACTOR = 0.15; 
-
-// 🔴 CAMÉRA VIRTUELLE (Simule l'objectif vidéo)
-// Focale moyenne, format 16:9, placée à 1m30 de hauteur, reculée de 3m20
-const virtualCam = new THREE.PerspectiveCamera(50, 16/9, 0.1, 100);
-virtualCam.position.set(0, 1.3, 3.2);
-virtualCam.lookAt(0, 1.0, 0);
+const SMOOTH_FACTOR = 0.25; 
 
 // ==========================================
 // 4. CHARGEMENT ASYNCHRONE
@@ -210,7 +206,7 @@ fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
     });
 
 // ==========================================
-// 5. RAYCASTING (Projection 2D vers 3D)
+// 5. MATHÉMATIQUES & POINTS MEDIAPIPE
 // ==========================================
 
 function getPoint(frame, k) {
@@ -232,34 +228,13 @@ function getWPos(bone) {
     return p;
 }
 
-// 🔴 PROJECTION OPTIQUE DES HANCHES SUR UN PLAN VIRTUEL
-function projectHipsTo3D(screenX, screenY) {
-    // Conversion MediaPipe (0 -> 1) vers Normalized Device Coordinates (-1 -> 1)
-    const ndcX = (screenX * 2) - 1;
-    const ndcY = -(screenY * 2) + 1;
-    
-    const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), virtualCam);
-    
-    // On projette sur un plan invisible situé à 1 mètre de hauteur (hauteur moyenne du bassin)
-    const hipPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -1.0); 
-    const target = new THREE.Vector3();
-    
-    if(raycaster.ray.intersectPlane(hipPlane, target)) {
-        return target; // Retourne (X, 1.0, Z) exact dans l'espace 3D
-    }
-    return new THREE.Vector3(0, 1.0, 0); // Secours
-}
-
 function getLowestY2D(frame) {
     const footIndices = [15, 16, 27, 28, 29, 30, 31, 32];
     let maxY = -Infinity; 
-
     footIndices.forEach(idx => {
         const pt = getScreenPoint(frame, idx);
         if (pt && pt.y > maxY) maxY = pt.y;
     });
-
     if (maxY === -Infinity) {
         const aL = getScreenPoint(frame, 15);
         const aR = getScreenPoint(frame, 16);
@@ -268,11 +243,18 @@ function getLowestY2D(frame) {
     return maxY;
 }
 
-function computeRootBasis(pLeft, pRight) {
-    const x = new THREE.Vector3().subVectors(pRight, pLeft).normalize();
-    const yUp = new THREE.Vector3(0, 1, 0); 
-    const z = new THREE.Vector3().crossVectors(x, yUp).normalize();
-    const y = new THREE.Vector3().crossVectors(z, x).normalize(); 
+// 🔴 LIBÉRATION DU BASSIN : Autorise toutes les rotations (Sway, Drop, Tilt)
+function computeRootBasis(hL, hR, midHip, midShoulder) {
+    const x = new THREE.Vector3().subVectors(hR, hL).normalize(); // Axe Droite-Gauche (Inclinaison latérale)
+    const y = new THREE.Vector3().subVectors(midShoulder, midHip).normalize(); // Axe Bas-Haut (Dos)
+    
+    // Adoucissement du penchement avant/arrière pour compenser le biais de la caméra
+    y.z *= 0.5; 
+    y.normalize();
+    
+    const z = new THREE.Vector3().crossVectors(x, y).normalize(); // Axe Avant-Arrière
+    x.crossVectors(y, z).normalize(); // Orthogonalisation finale
+    
     const mat = new THREE.Matrix4().makeBasis(x, y, z);
     return new THREE.Quaternion().setFromRotationMatrix(mat);
 }
@@ -284,17 +266,19 @@ function extractRestDirections() {
     const midHip = new THREE.Vector3().addVectors(hL, hR).multiplyScalar(0.5);
     const midShoulder = new THREE.Vector3().addVectors(sL, sR).multiplyScalar(0.5);
 
-    basePelvisQuat = computeRootBasis(hL, hR);
+    basePelvisQuat = computeRootBasis(hL, hR, midHip, midShoulder);
 
-    // Initialisation de la position ancrée (Frame 0)
     const frame0 = posesData[0];
     baseGroundRefY2D = getLowestY2D(frame0);
     
     const sHL0 = getScreenPoint(frame0, 11);
     const sHR0 = getScreenPoint(frame0, 12);
+    baseScreenX0 = (sHL0.x + sHR0.x) / 2;
     
-    // Projection du point central du bassin 2D vers le monde 3D
-    baseProjectedHips = projectHipsTo3D((sHL0.x + sHR0.x) / 2, (sHL0.y + sHR0.y) / 2);
+    const pHL0 = getPoint(frame0, 11);
+    const pHR0 = getPoint(frame0, 12);
+    baseMidHip3D_Z0 = (pHL0.z + pHR0.z) / 2;
+    
     baseModelPos = avatarModel.position.clone();
 
     restDirs.spine = new THREE.Vector3().subVectors(midShoulder, midHip).normalize();
@@ -309,7 +293,7 @@ function extractRestDirections() {
     restDirs.rightKnee = new THREE.Vector3().subVectors(getWPos(avatarBones.rightFoot), getWPos(avatarBones.rightKnee)).normalize();
 
     document.getElementById('loading').style.display = 'none';
-    logPanel.innerText = `✅ Raycasting initialisé.\nTransformation de la perspective 2D en profondeur 3D stricte.`;
+    logPanel.innerText = `✅ Modèle prêt. Déhanché (Hip Sway) 100% actif.`;
 }
 
 function checkAutoStart() {
@@ -348,7 +332,7 @@ player.addEventListener('timeupdate', () => {
 });
 
 // ==========================================
-// 7. CINÉMATIQUE & MOTEUR SPATIAL
+// 7. CINÉMATIQUE & GESTION DU DÉPLACEMENT
 // ==========================================
 function applyInheritedKinematics(bone, restDir, targetDir, rootDeltaQuat) {
     if (!bone || !restDir || !targetDir || !rootDeltaQuat) return;
@@ -398,32 +382,35 @@ function alignFootToGround(footBone, heelMP, toeMP, rootDeltaQuat) {
 }
 
 function applyPose(frame) {
-    if (!frame || !avatarModel || !basePelvisQuat || baseGroundRefY2D === null || !baseProjectedHips) return;
+    if (!frame || !avatarModel || !basePelvisQuat || baseGroundRefY2D === null) return;
 
-    // 🔴 1. POSITIONNEMENT PAR RAYCASTING (Projection 2D -> 3D)
+    // 🔴 1. DÉPLACEMENT (X = Écran, Z = Profondeur 3D MediaPipe, Y = Pieds)
     const currentLowestY2D = getLowestY2D(frame);
     
     const sHL = getScreenPoint(frame, 11);
     const sHR = getScreenPoint(frame, 12);
+    const currentScreenX = (sHL.x + sHR.x) / 2;
     
-    // On projette la nouvelle position du bassin dans le monde 3D
-    const currentProjectedHips = projectHipsTo3D((sHL.x + sHR.x) / 2, (sHL.y + sHR.y) / 2);
+    const pHL = getPoint(frame, 11);
+    const pHR = getPoint(frame, 12);
+    const currentMidHip3D_Z = (pHL.z + pHR.z) / 2;
 
-    // Delta mathématique pur (en mètres réels)
-    const deltaX = currentProjectedHips.x - baseProjectedHips.x;
-    const deltaZ = currentProjectedHips.z - baseProjectedHips.z;
-    
-    // Détection de saut (l'axe Y écran)
+    const deltaX = currentScreenX - baseScreenX0;
+    const deltaZ = currentMidHip3D_Z - baseMidHip3D_Z0;
     const deltaY = baseGroundRefY2D - currentLowestY2D;
 
+    const SCALE_X = 2.5;  
+    const SCALE_Y = 1.5; 
+    const SCALE_Z = 1.0;  
+
     const targetPos = baseModelPos.clone();
-    targetPos.x += deltaX * 1.5; // Ajustement d'envergure latérale
-    targetPos.z += deltaZ * 1.5; // Ajustement de profondeur
-    targetPos.y += Math.max(0, deltaY * 2.0); // Sauts gérés avec Y minimum = 0
+    targetPos.x += deltaX * SCALE_X;
+    targetPos.y += Math.max(0, deltaY * SCALE_Y); 
+    targetPos.z += deltaZ * SCALE_Z;
 
     avatarModel.position.lerp(targetPos, SMOOTH_FACTOR);
 
-    // 🔴 2. ROTATIONS SQUELETTE
+    // 🔴 2. ROTATIONS SQUELETTE & BASSIN LIBRE
     const nose = getPoint(frame, 0);
     const sL = getPoint(frame, 3), sR = getPoint(frame, 4);
     const eL = getPoint(frame, 5), eR = getPoint(frame, 6);
@@ -438,7 +425,8 @@ function applyPose(frame) {
     let deltaPelvis = new THREE.Quaternion();
 
     if (avatarBones.hips) {
-        const currentPelvisQuat = computeRootBasis(hL, hR);
+        // Le bassin utilise maintenant les hanches et les épaules pour incliner librement sur tous les axes
+        const currentPelvisQuat = computeRootBasis(hL, hR, midHip, midShoulder);
         deltaPelvis = currentPelvisQuat.clone().multiply(basePelvisQuat.clone().invert());
         
         const targetHipsGlobal = deltaPelvis.clone().multiply(avatarBones.hips.userData.initialWorldQuat);
@@ -452,13 +440,9 @@ function applyPose(frame) {
         avatarBones.hips.updateMatrixWorld(true);
     }
 
-    const spineDir = new THREE.Vector3().subVectors(midShoulder, midHip);
-    spineDir.z *= 0.8; 
-    spineDir.normalize();
-
-    const neckDir = new THREE.Vector3().subVectors(nose, midShoulder);
-    neckDir.z *= 0.8;
-    neckDir.normalize();
+    // Dos libre
+    const spineDir = new THREE.Vector3().subVectors(midShoulder, midHip).normalize();
+    const neckDir = new THREE.Vector3().subVectors(nose, midShoulder).normalize();
 
     const lShoulderDir = new THREE.Vector3().subVectors(eL, sL).normalize();
     const lElbowDir = new THREE.Vector3().subVectors(wL, eL).normalize();
