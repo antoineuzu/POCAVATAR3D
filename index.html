@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hdance - Relative Kinematics Fix</title>
+    <title>Hdance - Kinematics & Mapping Fix</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; background-color: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; overflow: hidden; }
         #top-half { display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0; }
@@ -15,7 +15,9 @@
         #controls-panel { width: 300px; padding: 15px; border-right: 2px solid #333; display: flex; flex-direction: column; gap: 10px; }
         .btn-action { background: #00ffcc; color: #000; padding: 10px; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; }
         .btn-action:hover { background: #00cca3; }
-        #log-panel { flex: 1; padding: 15px; overflow-y: auto; font-family: monospace; font-size: 12px; color: #0f0; white-space: pre-wrap; }
+        #log-panel { flex: 1; padding: 15px; overflow-y: auto; font-family: monospace; font-size: 12px; color: #0f0; white-space: pre-wrap; line-height: 1.4; }
+        .log-error { color: #ff4444; font-weight: bold; }
+        .log-success { color: #00ffcc; }
     </style>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -30,7 +32,7 @@
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
     <div id="canvas-container">
-        <div id="loading">Initialisation du moteur (Correction Position)...</div>
+        <div id="loading">Initialisation du moteur de mapping...</div>
     </div>
 </div>
 
@@ -41,29 +43,30 @@
         <button id="btn-debug-spheres" class="btn-action" style="background:#ffaa00; color:#000;">Afficher/Masquer Sphères IA</button>
         <button id="btn-debug-skeleton" class="btn-action" style="background:#444; color:#fff;">Afficher Lignes Squelette</button>
     </div>
-    <div id="log-panel">Attente du modèle 1.glb...</div>
+    <div id="log-panel" style="background: #050505; border-left: 1px solid #333;">Attente du modèle 1.glb...</div>
 </div>
 
 <script>
 // ==========================================
-// 1. DICTIONNAIRE ÉTENDU
+// 1. DICTIONNAIRE ÉTENDU (Correction Tête et Jambes)
 // ==========================================
 const BONE_DICTIONARY = {
-    hips: ["Hips", "pelvis", "mixamorigHips"],
-    spine: ["Spine", "spine_01", "mixamorigSpine"],
+    hips: ["Hips", "pelvis", "mixamorigHips", "Root"],
+    spine: ["Spine", "spine_01", "mixamorigSpine", "Chest", "chest"],
     neck: ["Neck", "neck_01", "mixamorigNeck"],
-    leftShoulder: ["LeftArm", "upperarm_l", "mixamorigLeftArm"],
-    rightShoulder: ["RightArm", "upperarm_r", "mixamorigRightArm"],
-    leftElbow: ["LeftForeArm", "lowerarm_l", "mixamorigLeftForeArm"],
-    rightElbow: ["RightForeArm", "lowerarm_r", "mixamorigRightForeArm"],
-    leftHand: ["LeftHand", "hand_l", "mixamorigLeftHand"],
-    rightHand: ["RightHand", "hand_r", "mixamorigRightHand"],
-    leftHip: ["LeftUpLeg", "thigh_l", "mixamorigLeftUpLeg"],
-    rightHip: ["RightUpLeg", "thigh_r", "mixamorigRightUpLeg"],
-    leftKnee: ["LeftLeg", "calf_l", "mixamorigLeftLeg"],
-    rightKnee: ["RightLeg", "calf_r", "mixamorigRightLeg"],
-    leftFoot: ["LeftFoot", "foot_l", "mixamorigLeftFoot"],
-    rightFoot: ["RightFoot", "foot_r", "mixamorigRightFoot"]
+    head: ["Head", "head_01", "mixamorigHead"], // Ajout de la tête !
+    leftShoulder: ["LeftArm", "upperarm_l", "mixamorigLeftArm", "L_UpperArm", "Shoulder_L"],
+    rightShoulder: ["RightArm", "upperarm_r", "mixamorigRightArm", "R_UpperArm", "Shoulder_R"],
+    leftElbow: ["LeftForeArm", "lowerarm_l", "mixamorigLeftForeArm", "L_Forearm", "Elbow_L"],
+    rightElbow: ["RightForeArm", "lowerarm_r", "mixamorigRightForeArm", "R_Forearm", "Elbow_R"],
+    leftHand: ["LeftHand", "hand_l", "mixamorigLeftHand", "L_Hand", "Hand_L"],
+    rightHand: ["RightHand", "hand_r", "mixamorigRightHand", "R_Hand", "Hand_R"],
+    leftHip: ["LeftUpLeg", "thigh_l", "mixamorigLeftUpLeg", "L_Thigh", "Thigh_L", "Leg_L"],
+    rightHip: ["RightUpLeg", "thigh_r", "mixamorigRightUpLeg", "R_Thigh", "Thigh_R", "Leg_R"],
+    leftKnee: ["LeftLeg", "calf_l", "mixamorigLeftLeg", "L_Calf", "Calf_L", "Knee_L"],
+    rightKnee: ["RightLeg", "calf_r", "mixamorigRightLeg", "R_Calf", "Calf_R", "Knee_R"],
+    leftFoot: ["LeftFoot", "foot_l", "mixamorigLeftFoot", "L_Foot", "Foot_L"],
+    rightFoot: ["RightFoot", "foot_r", "mixamorigRightFoot", "R_Foot", "Foot_R"]
 };
 
 // ==========================================
@@ -99,7 +102,7 @@ for(let i = 0; i < 21; i++) {
 }
 
 // ==========================================
-// 3. CHARGEMENT DU GLB & SAUVEGARDE REST POSE
+// 3. CHARGEMENT DU GLB ET DIAGNOSTIC
 // ==========================================
 let avatarModel = null;
 let avatarBones = {};
@@ -110,14 +113,13 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     avatarModel = gltf.scene;
     if (gltf.animations) gltf.animations = [];
 
+    // Sauvegarde des os trouvés
     avatarModel.traverse((node) => {
         if (node.isBone) {
-            // Sauvegarde de la rotation de repos initiale de chaque os
-            node.userData.initialQuat = node.quaternion.clone();
-
             for (const [logicalName, keywords] of Object.entries(BONE_DICTIONARY)) {
                 if (keywords.some(kw => node.name.toLowerCase().includes(kw.toLowerCase()))) {
-                    avatarBones[logicalName] = node;
+                    // On garde la première correspondance trouvée
+                    if(!avatarBones[logicalName]) avatarBones[logicalName] = node;
                 }
             }
         }
@@ -131,12 +133,21 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     const size = bbox.getSize(new THREE.Vector3());
     if (size.y > 0) avatarModel.scale.setScalar(1.7 / size.y);
 
-    // Force le modèle à l'origine (il n'y bougera plus)
     avatarModel.position.set(0, 0, 0);
     scene.add(avatarModel);
     
     document.getElementById('loading').style.display = 'none';
-    logPanel.innerText = `✅ Modèle chargé avec ancrage fixe.\nOs connectés : ${Object.keys(avatarBones).length} / 15`;
+
+    // Affichage strict du diagnostic
+    let logs = `<span class="log-success">✅ Modèle chargé (1.glb)</span>\n\n=== DIAGNOSTIC DU SQUELETTE ===\n`;
+    for (const key in BONE_DICTIONARY) {
+        if (avatarBones[key]) {
+            logs += `[OK] ${key} -> lié à "${avatarBones[key].name}"\n`;
+        } else {
+            logs += `<span class="log-error">[ERREUR] ${key} INTROUVABLE.</span>\n`;
+        }
+    }
+    logPanel.innerHTML = logs;
 });
 
 // ==========================================
@@ -156,7 +167,7 @@ fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
     });
 
 // ==========================================
-// 5. MOTEUR CINÉMATIQUE (Correction Hips & Split)
+// 5. MOTEUR CINÉMATIQUE
 // ==========================================
 function getPoint(frame, k) {
     const idx = 133 + (k * 3);
@@ -175,7 +186,6 @@ function applyKinematics(bone, pStart, pEnd, refAxis) {
         globalQuat.premultiply(parentQuat.invert());
     }
     
-    // On adoucit l'application pour éviter les cassures de maillage
     bone.quaternion.slerp(globalQuat, 0.7);
 }
 
@@ -201,30 +211,21 @@ function applyPose(frame) {
     const midHip = new THREE.Vector3().addVectors(hL, hR).multiplyScalar(0.5);
     const midShoulder = new THREE.Vector3().addVectors(sL, sR).multiplyScalar(0.5);
 
-    // 🔴 CORRECTION DU FLOTTEMENT 🔴
-    // Au lieu de déplacer le modèle complet, on translate uniquement l'os des hanches
-    // dans l'espace local de l'armature pour prendre en compte l'échelle (scale).
-    if (avatarBones.hips) {
-        if (avatarBones.hips.parent) {
-            const localHipPos = avatarBones.hips.parent.worldToLocal(midHip.clone());
-            avatarBones.hips.position.lerp(localHipPos, 0.8);
-        } else {
-            avatarBones.hips.position.lerp(midHip, 0.8);
-        }
-    }
+    // Déplacement global du modèle sur le bassin IA
+    avatarModel.position.copy(midHip);
 
-    // 🔴 CORRECTION DU SPLIT 🔴
-    // Nous appliquons des axes ajustés. Si les jambes se tordent encore, 
-    // l'axe Z (0, 0, 1) est souvent la clé pour les GLB Mixamo.
     const axisY = new THREE.Vector3(0, 1, 0);
     const axisNY = new THREE.Vector3(0, -1, 0); 
     const axisX = new THREE.Vector3(1, 0, 0);
     const axisNX = new THREE.Vector3(-1, 0, 0);
     const axisZ = new THREE.Vector3(0, 0, 1);
     
+    // Tête et Buste
     applyKinematics(avatarBones.spine, midHip, midShoulder, axisY);
     applyKinematics(avatarBones.neck, midShoulder, nose, axisY);
+    applyKinematics(avatarBones.head, midShoulder, nose, axisY); // Tête rajoutée
     
+    // Bras
     applyKinematics(avatarBones.leftShoulder, sL, eL, axisX);
     applyKinematics(avatarBones.leftElbow, eL, wL, axisX);
     applyKinematics(avatarBones.leftHand, wL, iL, axisX);
@@ -233,7 +234,7 @@ function applyPose(frame) {
     applyKinematics(avatarBones.rightElbow, eR, wR, axisNX);
     applyKinematics(avatarBones.rightHand, wR, iR, axisNX);
     
-    // Rotation des jambes avec l'axe descendant (-Y)
+    // Jambes
     applyKinematics(avatarBones.leftHip, hL, kL, axisNY);
     applyKinematics(avatarBones.leftKnee, kL, aL, axisNY);
     applyKinematics(avatarBones.leftFoot, aL, fL, axisZ);
@@ -250,12 +251,7 @@ function animate() {
     if (posesData.length > 0 && isManualPlaying) {
         currentVideoTime = (Date.now() - manualStartTime) / 1000;
         const frame = posesData.find(p => Math.abs(p[0] - currentVideoTime) < 0.04) || posesData[Math.floor(currentVideoTime * 25) % posesData.length];
-        if (frame) {
-            applyPose(frame);
-            if(Math.floor(currentVideoTime * 10) % 5 === 0) {
-                logPanel.innerText = `▶ Synchronisation : ${currentVideoTime.toFixed(2)}s\n\n- Position locale corrigée (Avatar au sol)\n- Rotation des jambes ajustée (-Y)`;
-            }
-        }
+        if (frame) applyPose(frame);
     }
     renderer.render(scene, camera);
 }
