@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hdance - Auto-Axis Absolute Kinematics</title>
+    <title>Hdance - Full 3D Root Motion</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; background-color: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; overflow: hidden; }
         #top-half { display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0; }
         #video-container { flex: 1; background: #000; border-right: 2px solid #333; }
         iframe { width: 100%; height: 100%; border: none; }
         #canvas-container { flex: 1; position: relative; background: #1a1a1a; }
-        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #00ffcc; font-weight: bold; text-align: center; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 8px; border: 1px solid #00ffcc;}
+        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #00ffcc; font-weight: bold; text-align: center; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 8px; border: 1px solid #00ffcc; z-index: 10;}
         #bottom-half { height: 250px; display: flex; background: #0a0a0a; }
         #controls-panel { width: 300px; padding: 15px; border-right: 2px solid #333; display: flex; flex-direction: column; gap: 10px; }
         .btn-action { background: #00ffcc; color: #000; padding: 10px; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; }
@@ -30,7 +30,7 @@
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
     <div id="canvas-container">
-        <div id="loading">Analyse des axes 3D & Synchronisation auto...</div>
+        <div id="loading">Analyse du Root Spatial & Rotation...</div>
     </div>
 </div>
 
@@ -73,7 +73,7 @@ const BONE_DICTIONARY = {
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
-camera.position.set(0, 1.5, 3.5);
+camera.position.set(0, 1.5, 4.0);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setSize(container.clientWidth, container.clientHeight);
@@ -89,7 +89,7 @@ scene.add(dirLight);
 scene.add(new THREE.GridHelper(10, 10, 0x333333, 0x222222));
 
 const debugSpheres = [];
-const sphereGeo = new THREE.SphereGeometry(0.02, 16, 16);
+const sphereGeo = new THREE.SphereGeometry(0.03, 16, 16);
 const matRed = new THREE.MeshBasicMaterial({ color: 0xff0000 });
 const matGreen = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
 
@@ -112,8 +112,8 @@ let posesData = [];
 let isModelReady = false;
 let isJsonReady = false;
 
-// Stockage des vecteurs natifs du GLB
 const restDirs = {};
+let basePelvisQuat = null; // Sauvegarde de la rotation initiale du bassin
 
 // ==========================================
 // 4. CHARGEMENT ASYNCHRONE (GLB & JSON)
@@ -122,7 +122,6 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     avatarModel = gltf.scene;
     if (gltf.animations) gltf.animations = [];
 
-    // Force la mise à jour des matrices pour lire la T-Pose exacte
     avatarModel.updateMatrixWorld(true);
 
     avatarModel.traverse((node) => {
@@ -130,8 +129,6 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
             for (const [logicalName, exactName] of Object.entries(BONE_DICTIONARY)) {
                 if (node.name === exactName) {
                     avatarBones[logicalName] = node;
-                    
-                    // Sauvegarde du Quaternion Global de repos (T-Pose)
                     node.userData.initialWorldQuat = new THREE.Quaternion();
                     node.getWorldQuaternion(node.userData.initialWorldQuat);
                 }
@@ -163,7 +160,7 @@ fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
     });
 
 // ==========================================
-// 5. AUTO-CALIBRAGE DES AXES 3D
+// 5. AUTO-CALIBRAGE & GESTION DU REPERE 3D
 // ==========================================
 function getWPos(bone) {
     const p = new THREE.Vector3();
@@ -171,37 +168,46 @@ function getWPos(bone) {
     return p;
 }
 
+// Construit un repère 3D complet (Quaternion) à partir des hanches et des épaules
+function computeBasis(pLeft, pRight, pBottom, pTop) {
+    const x = new THREE.Vector3().subVectors(pRight, pLeft).normalize(); // Axe Gauche -> Droite
+    const y = new THREE.Vector3().subVectors(pTop, pBottom).normalize(); // Axe Bas -> Haut
+    const z = new THREE.Vector3().crossVectors(x, y).normalize();        // Axe Arrière -> Avant
+    y.crossVectors(z, x).normalize(); // Re-orthogonalisation stricte
+    
+    const mat = new THREE.Matrix4().makeBasis(x, y, z);
+    return new THREE.Quaternion().setFromRotationMatrix(mat);
+}
+
 function extractRestDirections() {
-    // Calcule dynamiquement les vecteurs de direction de l'avatar 3D dans sa pose de base
     const sL = getWPos(avatarBones.leftShoulder), sR = getWPos(avatarBones.rightShoulder);
     const hL = getWPos(avatarBones.leftHip), hR = getWPos(avatarBones.rightHip);
     
     const midHip = new THREE.Vector3().addVectors(hL, hR).multiplyScalar(0.5);
     const midShoulder = new THREE.Vector3().addVectors(sL, sR).multiplyScalar(0.5);
 
+    // Capture de la rotation complète du bassin dans la pose 3D neutre
+    basePelvisQuat = computeBasis(hL, hR, midHip, midShoulder);
+
+    // Lignes directionnelles simples pour les membres
     restDirs.spine = new THREE.Vector3().subVectors(midShoulder, midHip).normalize();
     restDirs.neck = new THREE.Vector3().subVectors(getWPos(avatarBones.head), midShoulder).normalize();
-    
     restDirs.leftShoulder = new THREE.Vector3().subVectors(getWPos(avatarBones.leftElbow), sL).normalize();
     restDirs.leftElbow = new THREE.Vector3().subVectors(getWPos(avatarBones.leftHand), getWPos(avatarBones.leftElbow)).normalize();
-    
     restDirs.rightShoulder = new THREE.Vector3().subVectors(getWPos(avatarBones.rightElbow), sR).normalize();
     restDirs.rightElbow = new THREE.Vector3().subVectors(getWPos(avatarBones.rightHand), getWPos(avatarBones.rightElbow)).normalize();
-    
     restDirs.leftHip = new THREE.Vector3().subVectors(getWPos(avatarBones.leftKnee), hL).normalize();
     restDirs.leftKnee = new THREE.Vector3().subVectors(getWPos(avatarBones.leftFoot), getWPos(avatarBones.leftKnee)).normalize();
-    
     restDirs.rightHip = new THREE.Vector3().subVectors(getWPos(avatarBones.rightKnee), hR).normalize();
     restDirs.rightKnee = new THREE.Vector3().subVectors(getWPos(avatarBones.rightFoot), getWPos(avatarBones.rightKnee)).normalize();
     
-    logPanel.innerText = `✅ Axes 3D extraits dynamiquement.\n✅ JSON chargé.\n🎯 Avatar calé sur la Frame 0 du prof !`;
+    logPanel.innerText = `✅ Rotation 3D du bassin calculée.\n✅ Mouvements dans l'espace déverrouillés !`;
 }
 
 function checkAutoStart() {
     if (isModelReady && isJsonReady) {
         document.getElementById('loading').style.display = 'none';
         extractRestDirections();
-        // FORCE L'AVATAR SUR LA POSITION DE DÉPART DE LA VIDÉO AVANT MÊME LA LECTURE
         applyPose(posesData[0]); 
     }
 }
@@ -224,16 +230,10 @@ function getPoint(frame, k) {
 function applyAutoKinematics(bone, restDir, pStart, pEnd) {
     if (!bone || !restDir || !pStart || !pEnd) return;
     
-    // 1. Calcul du vecteur cible demandé par l'IA
     const targetDir = new THREE.Vector3().subVectors(pEnd, pStart).normalize();
-    
-    // 2. Calcul de la rotation pour passer du vecteur de repos 3D au vecteur cible IA
     const rot = new THREE.Quaternion().setFromUnitVectors(restDir, targetDir);
-    
-    // 3. Application de cette rotation à la posture globale initiale de l'os
     const targetWorldQuat = rot.multiply(bone.userData.initialWorldQuat);
     
-    // 4. Conversion en espace local
     const parentWorldQuat = new THREE.Quaternion();
     if (bone.parent && bone.parent.isBone) {
         bone.parent.getWorldQuaternion(parentWorldQuat);
@@ -245,7 +245,7 @@ function applyAutoKinematics(bone, restDir, pStart, pEnd) {
 }
 
 function applyPose(frame) {
-    if (!frame || !avatarModel || !restDirs.spine) return;
+    if (!frame || !avatarModel || !basePelvisQuat) return;
 
     for(let i = 0; i < 21; i++) {
         const pt = getPoint(frame, i);
@@ -263,17 +263,28 @@ function applyPose(frame) {
     const midHip = new THREE.Vector3().addVectors(hL, hR).multiplyScalar(0.5);
     const midShoulder = new THREE.Vector3().addVectors(sL, sR).multiplyScalar(0.5);
 
-    // Déplacement dynamique du bassin
+    // 🔴 1. DÉPLACEMENT ET ROTATION COMPLÈTE DU BASSIN 🔴
     if (avatarBones.hips) {
+        // Translation Libre (Marche, Saut)
         if(avatarBones.hips.parent) {
             const localHipPos = avatarBones.hips.parent.worldToLocal(midHip.clone());
             avatarBones.hips.position.lerp(localHipPos, 0.8);
-        } else {
-            avatarBones.hips.position.lerp(midHip, 0.8);
         }
+
+        // Rotation Libre (Retournement, Dos, Face)
+        const currentPelvisQuat = computeBasis(hL, hR, midHip, midShoulder);
+        const deltaPelvis = currentPelvisQuat.multiply(basePelvisQuat.clone().invert());
+        
+        const targetHipsGlobal = deltaPelvis.clone().multiply(avatarBones.hips.userData.initialWorldQuat);
+        
+        const parentQuat = new THREE.Quaternion();
+        if(avatarBones.hips.parent) avatarBones.hips.parent.getWorldQuaternion(parentQuat);
+        const targetHipsLocal = parentQuat.invert().multiply(targetHipsGlobal);
+        
+        avatarBones.hips.quaternion.slerp(targetHipsLocal, 0.8);
     }
 
-    // Kinématique Auto-Axe (Mappe l'IA directement sur la morphologie du GLB)
+    // 🔴 2. MEMBRES (Calculés PAR RAPPORT au nouveau bassin retourné) 🔴
     applyAutoKinematics(avatarBones.spine, restDirs.spine, midHip, midShoulder);
     applyAutoKinematics(avatarBones.neck, restDirs.neck, midShoulder, nose);
     
