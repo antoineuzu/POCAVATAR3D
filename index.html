@@ -3,11 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hdance - Split Screen & Perfect Sync</title>
+    <title>Hdance - Environnement 3D & Sync</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; background-color: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; overflow: hidden; }
         
-        /* RETOUR AU MODE 2 ZONES SÉPARÉES */
         #top-half { display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0; }
         #video-container { flex: 1; background: #000; border-right: 2px solid #333; }
         iframe { width: 100%; height: 100%; border: none; }
@@ -35,7 +34,7 @@
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
     <div id="canvas-container">
-        <div id="loading">Chargement du modèle et synchronisation vidéo...</div>
+        <div id="loading">Chargement du studio 3D et de l'avatar...</div>
     </div>
 </div>
 
@@ -64,28 +63,94 @@ const BONE_DICTIONARY = {
 };
 
 // ==========================================
-// 2. SCÈNE 3D
+// 2. SCÈNE 3D & STUDIO
 // ==========================================
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
-camera.position.set(0, 1.5, 4.0);
+camera.position.set(0, 1.5, 4.5);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(container.clientWidth, container.clientHeight);
+renderer.setClearColor(0x3a3a3c); // Couleur de fond (Mur)
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 container.appendChild(renderer.domElement);
 
-// Réactivation des contrôles de caméra (OrbitControls)
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 1.0, 0);
 
-scene.add(new THREE.AmbientLight(0xffffff, 1.5));
-const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
-dirLight.position.set(2, 5, 5);
-scene.add(dirLight);
+function buildRoom() {
+    // Éclairage Studio Chaleureux
+    const ambientLight = new THREE.AmbientLight(0xffeedd, 0.5);
+    scene.add(ambientLight);
 
-// Ajout de la grille au sol pour mieux visualiser l'espace
-scene.add(new THREE.GridHelper(10, 10, 0x333333, 0x222222));
+    const spotLight = new THREE.SpotLight(0xfff0dd, 1.2);
+    spotLight.position.set(2, 6, 4);
+    spotLight.angle = Math.PI / 4;
+    spotLight.penumbra = 0.5;
+    spotLight.castShadow = true;
+    spotLight.shadow.mapSize.width = 2048;
+    spotLight.shadow.mapSize.height = 2048;
+    scene.add(spotLight);
+
+    const fillLight = new THREE.DirectionalLight(0x90b0d0, 0.4);
+    fillLight.position.set(-4, 3, 2);
+    scene.add(fillLight);
+
+    // Sol (Béton Gris)
+    const floorGeo = new THREE.PlaneGeometry(20, 20);
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x696660, roughness: 0.9 });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    // Mur du fond (Gris Anthracite)
+    const wallGeo = new THREE.PlaneGeometry(20, 10);
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3c, roughness: 1.0 });
+    const wall = new THREE.Mesh(wallGeo, wallMat);
+    wall.position.set(0, 5, -4);
+    wall.receiveShadow = true;
+    scene.add(wall);
+
+    // Tapis central (Base claire pour le motif géométrique)
+    const rugGeo = new THREE.PlaneGeometry(3.5, 2.5);
+    const rugMat = new THREE.MeshStandardMaterial({ color: 0xe0dcd3, roughness: 1.0 });
+    const rug = new THREE.Mesh(rugGeo, rugMat);
+    rug.rotation.x = -Math.PI / 2;
+    rug.position.set(0, 0.01, 0);
+    rug.receiveShadow = true;
+    scene.add(rug);
+
+    // Canapé (Bleu Canard)
+    const sofaGeo = new THREE.BoxGeometry(2.5, 0.8, 1);
+    const sofaMat = new THREE.MeshStandardMaterial({ color: 0x3a5f78, roughness: 0.8 });
+    const sofa = new THREE.Mesh(sofaGeo, sofaMat);
+    sofa.position.set(-3.5, 0.4, -2);
+    sofa.castShadow = true;
+    sofa.receiveShadow = true;
+    scene.add(sofa);
+
+    // Coussin (Jaune Moutarde)
+    const pillowGeo = new THREE.BoxGeometry(0.5, 0.4, 0.2);
+    const pillowMat = new THREE.MeshStandardMaterial({ color: 0xd4a017, roughness: 0.9 });
+    const pillow = new THREE.Mesh(pillowGeo, pillowMat);
+    pillow.position.set(-3.0, 0.9, -1.8);
+    pillow.rotation.z = Math.PI / 12;
+    pillow.castShadow = true;
+    scene.add(pillow);
+
+    // Meuble / Commode (Bois)
+    const dresserGeo = new THREE.BoxGeometry(2.5, 1.2, 0.8);
+    const dresserMat = new THREE.MeshStandardMaterial({ color: 0xa67c52, roughness: 0.6 });
+    const dresser = new THREE.Mesh(dresserGeo, dresserMat);
+    dresser.position.set(3.5, 0.6, -2.5);
+    dresser.castShadow = true;
+    dresser.receiveShadow = true;
+    scene.add(dresser);
+}
+buildRoom();
 
 // ==========================================
 // 3. VARIABLES GLOBALES
@@ -113,7 +178,11 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     avatarModel.updateMatrixWorld(true);
 
     avatarModel.traverse((node) => {
-        if (node.isMesh || node.isSkinnedMesh) node.frustumCulled = false; 
+        if (node.isMesh || node.isSkinnedMesh) {
+            node.frustumCulled = false; 
+            node.castShadow = true;     // Activation des ombres sur l'avatar
+            node.receiveShadow = true;
+        }
         if (node.isSkinnedMesh) skinnedMeshes.push(node);
         
         if (node.isBone) {
@@ -133,9 +202,8 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
 
     const bbox = new THREE.Box3().setFromObject(avatarModel);
     const size = bbox.getSize(new THREE.Vector3());
-    if (size.y > 0) avatarModel.scale.setScalar(1.8 / size.y);
+    if (size.y > 0) avatarModel.scale.setScalar(1.75 / size.y);
 
-    // Repositionnement normal au centre de la scène
     avatarModel.position.set(0, 0, 0); 
     scene.add(avatarModel);
     
@@ -193,7 +261,7 @@ function extractRestDirections() {
     restDirs.rightKnee = new THREE.Vector3().subVectors(getWPos(avatarBones.rightFoot), getWPos(avatarBones.rightKnee)).normalize();
     
     document.getElementById('loading').style.display = 'none';
-    logPanel.innerText = `✅ Synchronisation établie en mode 2 zones.\nLancez ou déplacez le curseur de la vidéo : l'avatar suivra instantanément !`;
+    logPanel.innerText = `✅ Modèle calé dans son environnement.\nUtilisez la vidéo pour animer.`;
 }
 
 function checkAutoStart() {
@@ -222,7 +290,6 @@ player.addEventListener('pause', () => {
     logPanel.innerText = `⏸ Vidéo en pause à ${currentVideoTime.toFixed(2)}s`;
 });
 
-// Écoute le lecteur vidéo qui nous donne son temps réel
 player.addEventListener('timeupdate', () => { 
     player.currentTime.then(time => {
         currentVideoTime = time;
@@ -241,7 +308,6 @@ player.addEventListener('timeupdate', () => {
 // ==========================================
 function getPoint(frame, k) {
     const idx = 133 + (k * 3);
-    // Suppression de l'inversion X (utilisée uniquement pour l'overlay)
     return new THREE.Vector3(frame[idx], -frame[idx+1], -frame[idx+2]);
 }
 
@@ -331,7 +397,6 @@ function animate() {
     if (posesData.length > 0 && isModelReady) {
         let displayTime = currentVideoTime;
         
-        // Extrapolation de haute précision pendant la lecture
         if (isVideoPlaying) {
             displayTime += (performance.now() - lastSyncRealTime) / 1000;
         }
@@ -340,7 +405,7 @@ function animate() {
         if (frame) applyPose(frame);
     }
     
-    controls.update(); // Mise à jour de la caméra (OrbitControls)
+    controls.update(); 
     renderer.render(scene, camera);
 }
 animate();
