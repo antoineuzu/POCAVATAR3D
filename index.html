@@ -3,26 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hdance - Diagnostic GLB Intégré</title>
+    <title>Hdance - DHI MetaHuman Exact Kinematics</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; background-color: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; overflow: hidden; }
         #top-half { display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0; }
         #video-container { flex: 1; background: #000; border-right: 2px solid #333; }
         iframe { width: 100%; height: 100%; border: none; }
         #canvas-container { flex: 1; position: relative; background: #1a1a1a; }
-        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #00ffcc; font-weight: bold; text-align: center; z-index: 5; }
+        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #00ffcc; font-weight: bold; text-align: center; }
         #bottom-half { height: 280px; display: flex; background: #0a0a0a; }
         #controls-panel { width: 300px; padding: 15px; border-right: 2px solid #333; display: flex; flex-direction: column; gap: 10px; }
         .btn-action { background: #00ffcc; color: #000; padding: 10px; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; }
         .btn-action:hover { background: #00cca3; }
         #log-panel { flex: 1; padding: 15px; overflow-y: auto; font-family: monospace; font-size: 12px; color: #0f0; white-space: pre-wrap; line-height: 1.4; background: #050505;}
-        
-        /* Styles pour la Pop-up */
-        #diagnostic-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 1000; justify-content: center; align-items: center; }
-        #diagnostic-content { background: #111; border: 2px solid #cc00ff; border-radius: 8px; width: 80%; height: 80%; display: flex; flex-direction: column; padding: 20px; box-sizing: border-box; }
-        #diagnostic-textarea { flex: 1; background: #050505; color: #00ff66; font-family: 'Courier New', monospace; font-size: 13px; padding: 15px; border: 1px solid #333; overflow-y: auto; white-space: pre-wrap; resize: none; margin-bottom: 15px; }
-        .btn-close { background: #ff4444; color: #fff; padding: 10px; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; align-self: flex-end; }
-        .btn-close:hover { background: #cc0000; }
+        .log-error { color: #ff4444; font-weight: bold; }
+        .log-success { color: #00ffcc; }
     </style>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -32,22 +27,12 @@
 </head>
 <body>
 
-<!-- Fenêtre Pop-up Modale -->
-<div id="diagnostic-modal">
-    <div id="diagnostic-content">
-        <h2 style="color: #cc00ff; margin-top: 0;">🔍 Scanner d'Armature GLB</h2>
-        <p style="color: #aaa; font-size: 14px; margin-top: 0;">Copie l'intégralité du texte vert ci-dessous et colle-le dans la conversation.</p>
-        <textarea id="diagnostic-textarea" readonly>Analyse en cours...</textarea>
-        <button id="btn-close-modal" class="btn-close">Fermer la fenêtre</button>
-    </div>
-</div>
-
 <div id="top-half">
     <div id="video-container">
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
     <div id="canvas-container">
-        <div id="loading">Initialisation du diagnostic...</div>
+        <div id="loading">Initialisation DHI Exact Fix...</div>
     </div>
 </div>
 
@@ -56,13 +41,38 @@
         <h3 style="margin:0; color:#fff;">⚙️ Contrôles</h3>
         <button id="btn-force-play" class="btn-action">▶ Lancer Synchronisation</button>
         <button id="btn-debug-spheres" class="btn-action" style="background:#ffaa00; color:#000;">Afficher/Masquer Sphères IA</button>
-        <!-- Bouton Diagnostic -->
-        <button id="btn-diagnostic" class="btn-action" style="background:#cc00ff; color:#fff; border: 1px solid #fff;">📊 Extraire Squelette GLB</button>
+        <button id="btn-debug-skeleton" class="btn-action" style="background:#444; color:#fff;">Afficher Lignes Squelette</button>
     </div>
     <div id="log-panel">Attente du modèle 1.glb...</div>
 </div>
 
 <script>
+// ==========================================
+// 1. DICTIONNAIRE EXACT META-HUMAN
+// ==========================================
+// Remplacement des recherches floues par les noms stricts issus du diagnostic
+const BONE_DICTIONARY = {
+    hips: "DHIbodypelvis_04",
+    spine: "DHIbodyspine_01_05",
+    neck: "DHIbodyneck_01_010",
+    head: "DHIbodyhead_012",
+    leftShoulder: "DHIbodyupperarm_l_014",
+    rightShoulder: "DHIbodyupperarm_r_0145",
+    leftElbow: "DHIbodylowerarm_l_015",
+    rightElbow: "DHIbodylowerarm_r_0146",
+    leftHand: "DHIbodyhand_l_016",
+    rightHand: "DHIbodyhand_r_0147",
+    leftHip: "DHIbodythigh_l_0277",
+    rightHip: "DHIbodythigh_r_0310",
+    leftKnee: "DHIbodycalf_l_0278",
+    rightKnee: "DHIbodycalf_r_0311",
+    leftFoot: "DHIbodyfoot_l_0279",
+    rightFoot: "DHIbodyfoot_r_0312"
+};
+
+// ==========================================
+// 2. INITIALISATION SCÈNE
+// ==========================================
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
@@ -81,12 +91,43 @@ dirLight.position.set(2, 5, 2);
 scene.add(dirLight);
 scene.add(new THREE.GridHelper(10, 10, 0x333333, 0x222222));
 
+const debugSpheres = [];
+const sphereGeo = new THREE.SphereGeometry(0.02, 16, 16);
+const matRed = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+const matGreen = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+
+for(let i = 0; i < 21; i++) {
+    const mesh = new THREE.Mesh(sphereGeo, i % 2 !== 0 ? matRed : matGreen);
+    scene.add(mesh);
+    debugSpheres.push(mesh);
+}
+
+// ==========================================
+// 3. CHARGEMENT DU GLB ET MAPPING STRICT
+// ==========================================
 let avatarModel = null;
+let avatarBones = {};
+let skeletonHelper = null;
 const logPanel = document.getElementById('log-panel');
 
 new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     avatarModel = gltf.scene;
     if (gltf.animations) gltf.animations = [];
+
+    // Recherche exacte basée sur le nom
+    avatarModel.traverse((node) => {
+        if (node.isBone) {
+            for (const [logicalName, exactName] of Object.entries(BONE_DICTIONARY)) {
+                if (node.name === exactName) {
+                    avatarBones[logicalName] = node;
+                }
+            }
+        }
+    });
+
+    skeletonHelper = new THREE.SkeletonHelper(avatarModel);
+    skeletonHelper.visible = false;
+    scene.add(skeletonHelper);
 
     const bbox = new THREE.Box3().setFromObject(avatarModel);
     const size = bbox.getSize(new THREE.Vector3());
@@ -96,74 +137,149 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     scene.add(avatarModel);
     
     document.getElementById('loading').style.display = 'none';
-    logPanel.innerHTML = `<span style="color:#00ffcc">✅ Modèle 1.glb chargé.</span>\nClique sur "Extraire Squelette GLB" pour générer le rapport.`;
+
+    let logs = `<span class="log-success">✅ Modèle DHI chargé (1.glb)</span>\n\n=== MAPPING EXACT ===\n`;
+    for (const [logicalName, exactName] of Object.entries(BONE_DICTIONARY)) {
+        if (avatarBones[logicalName]) {
+            logs += `[OK] ${logicalName} -> ${avatarBones[logicalName].name}\n`;
+        } else {
+            logs += `<span class="log-error">[ERREUR] ${logicalName} (${exactName}) INTROUVABLE.</span>\n`;
+        }
+    }
+    logPanel.innerHTML = logs;
 });
 
 // ==========================================
-// OUTIL DE DIAGNOSTIC (Pop-up)
+// 4. LECTURE JSON & VIDÉO
 // ==========================================
-const diagnosticModal = document.getElementById('diagnostic-modal');
-const diagnosticTextarea = document.getElementById('diagnostic-textarea');
+let posesData = [];
+let currentVideoTime = 0, isManualPlaying = false, manualStartTime = 0;
+const player = Stream(document.getElementById('stream-player'));
 
-function generateDiagnosticReport() {
-    if (!avatarModel) return "Erreur : Le modèle 1.glb n'est pas encore chargé.";
-    
-    let report = "=========================================\n";
-    report += "       DIAGNOSTIC DU FICHIER 1.GLB       \n";
-    report += "=========================================\n\n";
+player.addEventListener('play', () => { isManualPlaying = true; manualStartTime = Date.now() - (currentVideoTime * 1000); });
+player.addEventListener('timeupdate', (e) => { if(e.currentTime > 0) currentVideoTime = e.currentTime; });
 
-    report += "--- 1. HIÉRARCHIE COMPLÈTE DU MODÈLE ---\n";
-    
-    function buildTree(node, depth = 0) {
-        const indent = "│   ".repeat(depth);
-        const isBone = node.isBone ? " 🦴 [BONE]" : "";
-        const isMesh = node.isSkinnedMesh ? " 👻 [SKINNED MESH]" : (node.isMesh ? " 🧊 [MESH]" : "");
-        
-        let nodeInfo = `${indent}├─ ${node.name || 'Unnamed'} (${node.type})${isBone}${isMesh}`;
-        
-        if (node.isSkinnedMesh && node.skeleton) {
-            nodeInfo += ` -> Attaché à un squelette de ${node.skeleton.bones.length} os.`;
-        }
-        
-        report += nodeInfo + "\n";
-        node.children.forEach(child => buildTree(child, depth + 1));
-    }
-    
-    buildTree(avatarModel);
-
-    report += "\n--- 2. LISTE PLATE DES OS (Bones) ---\n";
-    const bonesList = [];
-    avatarModel.traverse((node) => {
-        if (node.isBone) bonesList.push(node.name);
+fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
+    .then(r => r.text())
+    .then(text => {
+        text.trim().split('\n').slice(1).forEach(l => posesData.push(JSON.parse(l)));
     });
 
-    if (bonesList.length === 0) {
-        report += "ERREUR CRITIQUE : Aucun objet de type 'Bone' détecté. Le fichier n'est pas riggé pour Three.js.\n";
-    } else {
-        bonesList.forEach((b, i) => report += `${i + 1}. ${b}\n`);
-        report += `\nTotal : ${bonesList.length} os détectés.\n`;
-    }
-    
-    return report;
+// ==========================================
+// 5. MOTEUR CINÉMATIQUE 
+// ==========================================
+function getPoint(frame, k) {
+    const idx = 133 + (k * 3);
+    return new THREE.Vector3(frame[idx], -frame[idx+1], -frame[idx+2]);
 }
 
-document.getElementById('btn-diagnostic').addEventListener('click', () => {
-    diagnosticTextarea.value = generateDiagnosticReport();
-    diagnosticModal.style.display = "flex";
-});
+function applyKinematics(bone, pStart, pEnd, refAxis) {
+    if (!bone || !pStart || !pEnd) return;
+    
+    const direction = new THREE.Vector3().subVectors(pEnd, pStart).normalize();
+    const globalQuat = new THREE.Quaternion().setFromUnitVectors(refAxis, direction);
 
-document.getElementById('btn-close-modal').addEventListener('click', () => {
-    diagnosticModal.style.display = "none";
-});
+    const parentQuat = new THREE.Quaternion();
+    if (bone.parent && bone.parent.isBone) {
+        bone.parent.getWorldQuaternion(parentQuat);
+        globalQuat.premultiply(parentQuat.invert());
+    }
+    
+    bone.quaternion.slerp(globalQuat, 0.6);
+}
 
-// ==========================================
-// RENDER LOOP BAsique (pour garder la caméra active)
-// ==========================================
+function applyPose(frame) {
+    if (!frame || !avatarModel) return;
+
+    for(let i = 0; i < 21; i++) {
+        const pt = getPoint(frame, i);
+        if(debugSpheres[i]) debugSpheres[i].position.copy(pt);
+    }
+
+    const nose = getPoint(frame, 0);
+    const sL = getPoint(frame, 3), sR = getPoint(frame, 4);
+    const eL = getPoint(frame, 5), eR = getPoint(frame, 6);
+    const wL = getPoint(frame, 7), wR = getPoint(frame, 8);
+    const hL = getPoint(frame, 11), hR = getPoint(frame, 12);
+    const kL = getPoint(frame, 13), kR = getPoint(frame, 14);
+    const aL = getPoint(frame, 15), aR = getPoint(frame, 16);
+    
+    const iL = getPoint(frame, 9), iR = getPoint(frame, 10);
+    const fL = getPoint(frame, 19), fR = getPoint(frame, 20);
+    
+    const midHip = new THREE.Vector3().addVectors(hL, hR).multiplyScalar(0.5);
+    const midShoulder = new THREE.Vector3().addVectors(sL, sR).multiplyScalar(0.5);
+
+    // Déplacement de l'os principal du bassin uniquement (DHIbodypelvis_04)
+    if (avatarBones.hips) {
+        if(avatarBones.hips.parent) {
+            const localHipPos = avatarBones.hips.parent.worldToLocal(midHip.clone());
+            avatarBones.hips.position.lerp(localHipPos, 0.8);
+        } else {
+            avatarBones.hips.position.lerp(midHip, 0.8);
+        }
+    }
+
+    // Axes standards d'un squelette Unreal Engine / MetaHuman
+    const axisY = new THREE.Vector3(0, 1, 0);
+    const axisNY = new THREE.Vector3(0, -1, 0);
+    const axisX = new THREE.Vector3(1, 0, 0);
+    const axisNX = new THREE.Vector3(-1, 0, 0);
+    const axisZ = new THREE.Vector3(0, 0, 1);
+    
+    applyKinematics(avatarBones.spine, midHip, midShoulder, axisY);
+    applyKinematics(avatarBones.neck, midShoulder, nose, axisY);
+    applyKinematics(avatarBones.head, midShoulder, nose, axisY);
+    
+    applyKinematics(avatarBones.leftShoulder, sL, eL, axisX);
+    applyKinematics(avatarBones.leftElbow, eL, wL, axisX);
+    applyKinematics(avatarBones.leftHand, wL, iL, axisX);
+    
+    applyKinematics(avatarBones.rightShoulder, sR, eR, axisNX);
+    applyKinematics(avatarBones.rightElbow, eR, wR, axisNX);
+    applyKinematics(avatarBones.rightHand, wR, iR, axisNX);
+    
+    applyKinematics(avatarBones.leftHip, hL, kL, axisNY);
+    applyKinematics(avatarBones.leftKnee, kL, aL, axisNY);
+    applyKinematics(avatarBones.leftFoot, aL, fL, axisZ);
+    
+    applyKinematics(avatarBones.rightHip, hR, kR, axisNY);
+    applyKinematics(avatarBones.rightKnee, kR, aR, axisNY);
+    applyKinematics(avatarBones.rightFoot, aR, fR, axisZ);
+
+    if(skeletonHelper) skeletonHelper.update();
+}
+
 function animate() {
     requestAnimationFrame(animate);
+    if (posesData.length > 0 && isManualPlaying) {
+        currentVideoTime = (Date.now() - manualStartTime) / 1000;
+        const frame = posesData.find(p => Math.abs(p[0] - currentVideoTime) < 0.04) || posesData[Math.floor(currentVideoTime * 25) % posesData.length];
+        if (frame) applyPose(frame);
+    }
     renderer.render(scene, camera);
 }
 animate();
+
+// ==========================================
+// 6. ÉVÉNEMENTS HTML
+// ==========================================
+document.getElementById('btn-force-play').addEventListener('click', () => {
+    isManualPlaying = !isManualPlaying;
+    if(isManualPlaying) manualStartTime = Date.now() - (currentVideoTime * 1000);
+});
+
+let spheresVisible = true;
+document.getElementById('btn-debug-spheres').addEventListener('click', (e) => {
+    spheresVisible = !spheresVisible;
+    debugSpheres.forEach(s => s.visible = spheresVisible);
+});
+
+document.getElementById('btn-debug-skeleton').addEventListener('click', (e) => {
+    if(skeletonHelper) {
+        skeletonHelper.visible = !skeletonHelper.visible;
+    }
+});
 </script>
 
 </body>
