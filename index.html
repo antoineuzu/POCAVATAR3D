@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hdance - Cyber Studio & Fluid Mocap</title>
+    <title>Hdance - Raycasting & Zero-Slide Mocap</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; background-color: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; overflow: hidden; }
         #top-half { display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0; }
@@ -30,14 +30,14 @@
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
     <div id="canvas-container">
-        <div id="loading">Illumination du Studio & Libération du déhanché...</div>
+        <div id="loading">Étalonnage optique de la caméra virtuelle...</div>
     </div>
 </div>
 
 <div id="bottom-half">
     <div id="controls-panel">
         <h3 style="margin:0; color:#fff;">⚙️ Contrôles</h3>
-        <p style="font-size: 11px; color: #aaa; margin: 0;">Avatar MetaHuman + Éclairage Studio + Mouvements fluides.</p>
+        <p style="font-size: 11px; color: #aaa; margin: 0;">Projection optique active. Glissements du sol éliminés.</p>
         <button id="btn-debug-skeleton" class="btn-action" style="background:#ffaa00; color:#000; margin-top: 10px;">🦴 Afficher Lignes Squelette</button>
         <button id="btn-toggle-mesh" class="btn-action" style="background:#444; color:#fff;">👻 Masquer la peau 3D</button>
     </div>
@@ -103,31 +103,30 @@ function buildFuturisticStudio() {
     wallGrid2.material.opacity = 0.2;
     scene.add(wallGrid2);
 
-    // ÉCLAIRAGE STUDIO RENFORCÉ
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8); // Ambiance globale plus forte
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
     scene.add(ambientLight);
 
-    const frontLight = new THREE.DirectionalLight(0xffffff, 1.2); // Débouche les ombres de face
+    const frontLight = new THREE.DirectionalLight(0xffffff, 1.2);
     frontLight.position.set(0, 2, 5);
     scene.add(frontLight);
 
-    const blueLight = new THREE.PointLight(0x00ffff, 4.0, 20); // Cyan intense
+    const blueLight = new THREE.PointLight(0x00ffff, 4.0, 20);
     blueLight.position.set(3, 3, 3);
     blueLight.castShadow = true;
     scene.add(blueLight);
 
-    const pinkLight = new THREE.PointLight(0xff00ff, 3.5, 20); // Rose vibrant
+    const pinkLight = new THREE.PointLight(0xff00ff, 3.5, 20);
     pinkLight.position.set(-3, 2, 2);
     scene.add(pinkLight);
 
-    const mustardLight = new THREE.PointLight(0xffdb58, 4.0, 20); // Moutarde chaud en contre-jour
+    const mustardLight = new THREE.PointLight(0xffdb58, 4.0, 20);
     mustardLight.position.set(0, 4, -4);
     scene.add(mustardLight);
 }
 buildFuturisticStudio();
 
 // ==========================================
-// 3. VARIABLES GLOBALES
+// 3. VARIABLES GLOBALES ET CAMÉRA VIRTUELLE
 // ==========================================
 let avatarModel = null;
 let avatarBones = {};
@@ -141,16 +140,20 @@ let isJsonReady = false;
 
 const restDirs = {};
 let basePelvisQuat = null;
-
 let baseGroundRefY2D = null;
-let baseScreenX0 = null;
-let baseScreenZ0 = null;
+let baseProjectedHips = null;
 let baseModelPos = null;
 
-const SMOOTH_FACTOR = 0.2; 
+const SMOOTH_FACTOR = 0.15; 
+
+// 🔴 CAMÉRA VIRTUELLE (Simule l'objectif vidéo)
+// Focale moyenne, format 16:9, placée à 1m30 de hauteur, reculée de 3m20
+const virtualCam = new THREE.PerspectiveCamera(50, 16/9, 0.1, 100);
+virtualCam.position.set(0, 1.3, 3.2);
+virtualCam.lookAt(0, 1.0, 0);
 
 // ==========================================
-// 4. CHARGEMENT ASYNCHRONE & ANCRAGE
+// 4. CHARGEMENT ASYNCHRONE
 // ==========================================
 new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     avatarModel = gltf.scene;
@@ -161,7 +164,6 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
             node.frustumCulled = false; 
             node.castShadow = true;     
             node.receiveShadow = true;
-            // On rend le matériau plus réactif aux lumières colorées
             if (node.material) {
                 node.material.roughness = 0.5;
                 node.material.metalness = 0.1;
@@ -189,7 +191,6 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     if (size.y > 0) avatarModel.scale.setScalar(1.75 / size.y);
 
     avatarModel.updateMatrixWorld(true);
-    
     const scaledBbox = new THREE.Box3().setFromObject(avatarModel);
     avatarModel.position.set(0, -scaledBbox.min.y, 0); 
     avatarModel.updateMatrixWorld(true);
@@ -209,7 +210,7 @@ fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
     });
 
 // ==========================================
-// 5. MATHÉMATIQUES & POINTS MEDIAPIPE
+// 5. RAYCASTING (Projection 2D vers 3D)
 // ==========================================
 
 function getPoint(frame, k) {
@@ -231,6 +232,25 @@ function getWPos(bone) {
     return p;
 }
 
+// 🔴 PROJECTION OPTIQUE DES HANCHES SUR UN PLAN VIRTUEL
+function projectHipsTo3D(screenX, screenY) {
+    // Conversion MediaPipe (0 -> 1) vers Normalized Device Coordinates (-1 -> 1)
+    const ndcX = (screenX * 2) - 1;
+    const ndcY = -(screenY * 2) + 1;
+    
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), virtualCam);
+    
+    // On projette sur un plan invisible situé à 1 mètre de hauteur (hauteur moyenne du bassin)
+    const hipPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -1.0); 
+    const target = new THREE.Vector3();
+    
+    if(raycaster.ray.intersectPlane(hipPlane, target)) {
+        return target; // Retourne (X, 1.0, Z) exact dans l'espace 3D
+    }
+    return new THREE.Vector3(0, 1.0, 0); // Secours
+}
+
 function getLowestY2D(frame) {
     const footIndices = [15, 16, 27, 28, 29, 30, 31, 32];
     let maxY = -Infinity; 
@@ -248,13 +268,10 @@ function getLowestY2D(frame) {
     return maxY;
 }
 
-// 🔴 LIBÉRATION DU DÉHANCHÉ (Hip Sway)
 function computeRootBasis(pLeft, pRight) {
     const x = new THREE.Vector3().subVectors(pRight, pLeft).normalize();
-    // On force l'axe Z (Avant) à rester horizontal pour ne pas s'écrouler en avant
     const yUp = new THREE.Vector3(0, 1, 0); 
     const z = new THREE.Vector3().crossVectors(x, yUp).normalize();
-    // L'axe Y final est recréé orthogonalement, ce qui autorise les hanches à rouler (gauche/droite) !
     const y = new THREE.Vector3().crossVectors(z, x).normalize(); 
     const mat = new THREE.Matrix4().makeBasis(x, y, z);
     return new THREE.Quaternion().setFromRotationMatrix(mat);
@@ -269,14 +286,15 @@ function extractRestDirections() {
 
     basePelvisQuat = computeRootBasis(hL, hR);
 
+    // Initialisation de la position ancrée (Frame 0)
     const frame0 = posesData[0];
     baseGroundRefY2D = getLowestY2D(frame0);
     
     const sHL0 = getScreenPoint(frame0, 11);
     const sHR0 = getScreenPoint(frame0, 12);
-    baseScreenX0 = (sHL0.x + sHR0.x) / 2;
-    baseScreenZ0 = (sHL0.z + sHR0.z) / 2;
     
+    // Projection du point central du bassin 2D vers le monde 3D
+    baseProjectedHips = projectHipsTo3D((sHL0.x + sHR0.x) / 2, (sHL0.y + sHR0.y) / 2);
     baseModelPos = avatarModel.position.clone();
 
     restDirs.spine = new THREE.Vector3().subVectors(midShoulder, midHip).normalize();
@@ -291,7 +309,7 @@ function extractRestDirections() {
     restDirs.rightKnee = new THREE.Vector3().subVectors(getWPos(avatarBones.rightFoot), getWPos(avatarBones.rightKnee)).normalize();
 
     document.getElementById('loading').style.display = 'none';
-    logPanel.innerText = `✅ Studio en place.\nFluidité du corps restaurée.`;
+    logPanel.innerText = `✅ Raycasting initialisé.\nTransformation de la perspective 2D en profondeur 3D stricte.`;
 }
 
 function checkAutoStart() {
@@ -330,7 +348,7 @@ player.addEventListener('timeupdate', () => {
 });
 
 // ==========================================
-// 7. CINÉMATIQUE & GESTION DES PIEDS
+// 7. CINÉMATIQUE & MOTEUR SPATIAL
 // ==========================================
 function applyInheritedKinematics(bone, restDir, targetDir, rootDeltaQuat) {
     if (!bone || !restDir || !targetDir || !rootDeltaQuat) return;
@@ -380,32 +398,32 @@ function alignFootToGround(footBone, heelMP, toeMP, rootDeltaQuat) {
 }
 
 function applyPose(frame) {
-    if (!frame || !avatarModel || !basePelvisQuat || baseGroundRefY2D === null) return;
+    if (!frame || !avatarModel || !basePelvisQuat || baseGroundRefY2D === null || !baseProjectedHips) return;
 
-    // TRANSLATION & SAUTS
+    // 🔴 1. POSITIONNEMENT PAR RAYCASTING (Projection 2D -> 3D)
     const currentLowestY2D = getLowestY2D(frame);
     
     const sHL = getScreenPoint(frame, 11);
     const sHR = getScreenPoint(frame, 12);
-    const currentScreenX = (sHL.x + sHR.x) / 2;
-    const currentScreenZ = (sHL.z + sHR.z) / 2;
+    
+    // On projette la nouvelle position du bassin dans le monde 3D
+    const currentProjectedHips = projectHipsTo3D((sHL.x + sHR.x) / 2, (sHL.y + sHR.y) / 2);
 
-    const deltaX = currentScreenX - baseScreenX0;
-    const deltaZ = currentScreenZ - baseScreenZ0;
+    // Delta mathématique pur (en mètres réels)
+    const deltaX = currentProjectedHips.x - baseProjectedHips.x;
+    const deltaZ = currentProjectedHips.z - baseProjectedHips.z;
+    
+    // Détection de saut (l'axe Y écran)
     const deltaY = baseGroundRefY2D - currentLowestY2D;
 
-    const ROOM_WIDTH = 1.8;  
-    const ROOM_HEIGHT = 1.5; 
-    const ROOM_DEPTH = 1.0;  
-
     const targetPos = baseModelPos.clone();
-    targetPos.x += deltaX * ROOM_WIDTH;
-    targetPos.y += Math.max(0, deltaY * ROOM_HEIGHT); 
-    targetPos.z += deltaZ * ROOM_DEPTH;
+    targetPos.x += deltaX * 1.5; // Ajustement d'envergure latérale
+    targetPos.z += deltaZ * 1.5; // Ajustement de profondeur
+    targetPos.y += Math.max(0, deltaY * 2.0); // Sauts gérés avec Y minimum = 0
 
     avatarModel.position.lerp(targetPos, SMOOTH_FACTOR);
 
-    // ROTATIONS SQUELETTE
+    // 🔴 2. ROTATIONS SQUELETTE
     const nose = getPoint(frame, 0);
     const sL = getPoint(frame, 3), sR = getPoint(frame, 4);
     const eL = getPoint(frame, 5), eR = getPoint(frame, 6);
@@ -434,9 +452,8 @@ function applyPose(frame) {
         avatarBones.hips.updateMatrixWorld(true);
     }
 
-    // 🔴 SOUPLESSE DU DOS : On augmente le ratio Z pour permettre à l'avatar de se cambrer
     const spineDir = new THREE.Vector3().subVectors(midShoulder, midHip);
-    spineDir.z *= 0.8; // Beaucoup plus souple (contre 0.2 auparavant)
+    spineDir.z *= 0.8; 
     spineDir.normalize();
 
     const neckDir = new THREE.Vector3().subVectors(nose, midShoulder);
