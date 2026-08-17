@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hdance - Delta Position & Face Cam</title>
+    <title>Hdance - Root Motion & Vertical Lock</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; background-color: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; overflow: hidden; }
         
@@ -34,14 +34,14 @@
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
     <div id="canvas-container">
-        <div id="loading">Chargement du studio et recalibrage du sol...</div>
+        <div id="loading">Analyse des mouvements globaux (Root Motion)...</div>
     </div>
 </div>
 
 <div id="bottom-half">
     <div id="controls-panel">
         <h3 style="margin:0; color:#fff;">⚙️ Contrôles</h3>
-        <p style="font-size: 11px; color: #aaa; margin: 0;">La vue 3D est désormais alignée face caméra comme la vidéo.</p>
+        <p style="font-size: 11px; color: #aaa; margin: 0;">L'avatar bouge désormais librement dans le studio.</p>
         <button id="btn-debug-skeleton" class="btn-action" style="background:#ffaa00; color:#000; margin-top: 10px;">🦴 Afficher Lignes Squelette</button>
         <button id="btn-toggle-mesh" class="btn-action" style="background:#444; color:#fff;">👻 Masquer la peau 3D</button>
     </div>
@@ -68,7 +68,6 @@ const BONE_DICTIONARY = {
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 
-// Caméra face à la scène
 const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
 camera.position.set(0, 1.4, 5.0);
 
@@ -83,7 +82,6 @@ const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 1.0, 0);
 
 function buildStudioFace() {
-    // Éclairage
     const ambientLight = new THREE.AmbientLight(0xffeedd, 0.6);
     scene.add(ambientLight);
 
@@ -100,7 +98,6 @@ function buildStudioFace() {
     fillLight.position.set(-4, 3, 3);
     scene.add(fillLight);
 
-    // Sol (Béton)
     const floorGeo = new THREE.PlaneGeometry(30, 30);
     const floorMat = new THREE.MeshStandardMaterial({ color: 0x5a5855, roughness: 0.9 });
     const floor = new THREE.Mesh(floorGeo, floorMat);
@@ -108,7 +105,6 @@ function buildStudioFace() {
     floor.receiveShadow = true;
     scene.add(floor);
 
-    // Mur du fond plat
     const wallMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3c, roughness: 1.0 });
     const wallBackGeo = new THREE.PlaneGeometry(30, 15);
     const wallBack = new THREE.Mesh(wallBackGeo, wallMat);
@@ -116,7 +112,6 @@ function buildStudioFace() {
     wallBack.receiveShadow = true;
     scene.add(wallBack);
 
-    // Tapis central
     const rugGeo = new THREE.PlaneGeometry(3.5, 2.0);
     const rugMat = new THREE.MeshStandardMaterial({ color: 0xe0dcd3, roughness: 0.9 });
     const rug = new THREE.Mesh(rugGeo, rugMat);
@@ -125,7 +120,6 @@ function buildStudioFace() {
     rug.receiveShadow = true;
     scene.add(rug);
 
-    // Canapé (à gauche)
     const sofaGeo = new THREE.BoxGeometry(2.8, 0.8, 1.0);
     const sofaMat = new THREE.MeshStandardMaterial({ color: 0x3a5f78, roughness: 0.8 });
     const sofa = new THREE.Mesh(sofaGeo, sofaMat);
@@ -134,7 +128,6 @@ function buildStudioFace() {
     sofa.receiveShadow = true;
     scene.add(sofa);
 
-    // Coussin
     const pillowGeo = new THREE.BoxGeometry(0.5, 0.4, 0.25);
     const pillowMat = new THREE.MeshStandardMaterial({ color: 0xd4a017, roughness: 0.9 });
     const pillow = new THREE.Mesh(pillowGeo, pillowMat);
@@ -144,7 +137,6 @@ function buildStudioFace() {
     pillow.castShadow = true;
     scene.add(pillow);
 
-    // Meuble (à droite)
     const dresserGeo = new THREE.BoxGeometry(2.5, 1.2, 0.8);
     const dresserMat = new THREE.MeshStandardMaterial({ color: 0xa67c52, roughness: 0.6 });
     const dresser = new THREE.Mesh(dresserGeo, dresserMat);
@@ -170,10 +162,8 @@ let isJsonReady = false;
 
 const restDirs = {};
 let basePelvisQuat = null;
-
-// Variables pour corriger l'enfoncement dans le sol
 let baseMediaHip = null;
-let baseHipLocalPos = null;
+let baseModelPos = null;
 
 // ==========================================
 // 4. CHARGEMENT ASYNCHRONE
@@ -211,6 +201,7 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     const size = bbox.getSize(new THREE.Vector3());
     if (size.y > 0) avatarModel.scale.setScalar(1.75 / size.y);
 
+    // Initialisation du modèle au point 0,0,0
     avatarModel.position.set(0, 0, 0); 
     scene.add(avatarModel);
     
@@ -231,6 +222,7 @@ fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
 // ==========================================
 function getPoint(frame, k) {
     const idx = 133 + (k * 3);
+    // Un léger facteur de multiplication (ex: 1.5) peut être ajouté ici si l'avatar ne se déplace pas assez loin
     return new THREE.Vector3(frame[idx], -frame[idx+1], -frame[idx+2]);
 }
 
@@ -243,11 +235,12 @@ function getWPos(bone) {
     return p;
 }
 
-function computeBasis(pLeft, pRight, pBottom, pTop) {
-    const x = new THREE.Vector3().subVectors(pRight, pLeft).normalize();
-    const y = new THREE.Vector3().subVectors(pTop, pBottom).normalize();
-    const z = new THREE.Vector3().crossVectors(x, y).normalize();
-    y.crossVectors(z, x).normalize(); 
+// 🔴 NOUVEAU: On force l'axe Y (Haut) à être parfaitement vertical pour empêcher le corps de pencher !
+function computeRootBasis(pLeft, pRight) {
+    const x = new THREE.Vector3().subVectors(pRight, pLeft).normalize(); // Epaules ou hanches
+    const y = new THREE.Vector3(0, 1, 0); // On FORCE la verticale
+    const z = new THREE.Vector3().crossVectors(x, y).normalize(); // Avant
+    x.crossVectors(y, z).normalize(); // Orthogonalisation finale
     const mat = new THREE.Matrix4().makeBasis(x, y, z);
     return new THREE.Quaternion().setFromRotationMatrix(mat);
 }
@@ -259,17 +252,14 @@ function extractRestDirections() {
     const midHip = new THREE.Vector3().addVectors(hL, hR).multiplyScalar(0.5);
     const midShoulder = new THREE.Vector3().addVectors(sL, sR).multiplyScalar(0.5);
 
-    basePelvisQuat = computeBasis(hL, hR, midHip, midShoulder);
+    // On calcule l'orientation du bassin bloquée sur l'axe Y
+    basePelvisQuat = computeRootBasis(hL, hR);
 
-    // Sauvegarde de la position des hanches sur la toute première image de la vidéo (Frame 0)
+    // Sauvegarde de la translation
     const frame0 = posesData[0];
     const hL0 = getPoint(frame0, 11), hR0 = getPoint(frame0, 12);
     baseMediaHip = new THREE.Vector3().addVectors(hL0, hR0).multiplyScalar(0.5);
-    
-    // Sauvegarde de la hauteur locale PAR DÉFAUT du modèle (les pieds touchent le sol)
-    if (avatarBones.hips) {
-        baseHipLocalPos = avatarBones.hips.position.clone();
-    }
+    baseModelPos = avatarModel.position.clone(); // Toujours 0,0,0
 
     restDirs.spine = new THREE.Vector3().subVectors(midShoulder, midHip).normalize();
     restDirs.neck = new THREE.Vector3().subVectors(getWPos(avatarBones.head), midShoulder).normalize();
@@ -283,7 +273,7 @@ function extractRestDirections() {
     restDirs.rightKnee = new THREE.Vector3().subVectors(getWPos(avatarBones.rightFoot), getWPos(avatarBones.rightKnee)).normalize();
     
     document.getElementById('loading').style.display = 'none';
-    logPanel.innerText = `✅ Modèle calé au niveau du sol !`;
+    logPanel.innerText = `✅ Modèle droit, pieds au sol.\nPrêt à se déplacer dans la pièce !`;
 }
 
 function checkAutoStart() {
@@ -304,29 +294,25 @@ const player = Stream(document.getElementById('stream-player'));
 player.addEventListener('playing', () => { 
     isVideoPlaying = true; 
     lastSyncRealTime = performance.now();
-    logPanel.innerText = "▶ Lecture vidéo en cours...";
 });
 
 player.addEventListener('pause', () => { 
     isVideoPlaying = false; 
-    logPanel.innerText = `⏸ Vidéo en pause à ${currentVideoTime.toFixed(2)}s`;
 });
 
 player.addEventListener('timeupdate', () => { 
     player.currentTime.then(time => {
         currentVideoTime = time;
         lastSyncRealTime = performance.now();
-        
         if (!isVideoPlaying) {
             const frame = posesData.find(p => Math.abs(p[0] - currentVideoTime) < 0.04) || posesData[Math.floor(currentVideoTime * 25) % posesData.length];
             if (frame) applyPose(frame);
-            logPanel.innerText = `⏱ Navigation manuelle à ${currentVideoTime.toFixed(2)}s`;
         }
     });
 });
 
 // ==========================================
-// 7. MOTEUR CINÉMATIQUE (Delta Hips)
+// 7. MOTEUR CINÉMATIQUE (Root Motion)
 // ==========================================
 function applyInheritedKinematics(bone, restDir, pStart, pEnd, rootDeltaQuat) {
     if (!bone || !restDir || !pStart || !pEnd || !rootDeltaQuat) return;
@@ -353,7 +339,7 @@ function applyInheritedKinematics(bone, restDir, pStart, pEnd, rootDeltaQuat) {
 }
 
 function applyPose(frame) {
-    if (!frame || !avatarModel || !basePelvisQuat || !baseMediaHip || !baseHipLocalPos) return;
+    if (!frame || !avatarModel || !basePelvisQuat || !baseMediaHip) return;
 
     const nose = getPoint(frame, 0);
     const sL = getPoint(frame, 3), sR = getPoint(frame, 4);
@@ -364,22 +350,19 @@ function applyPose(frame) {
     const aL = getPoint(frame, 15), aR = getPoint(frame, 16);
     
     const midHip = new THREE.Vector3().addVectors(hL, hR).multiplyScalar(0.5);
-    const midShoulder = new THREE.Vector3().addVectors(sL, sR).multiplyScalar(0.5);
+
+    // 🔴 ROOT MOTION GLOBAL : On déplace tout le conteneur du personnage !
+    const deltaPos = midHip.clone().sub(baseMediaHip);
+    const targetModelPos = baseModelPos.clone().add(deltaPos);
+    
+    // Le personnage se déplace dans l'espace, gardant ses pieds parfaitement posés au sol
+    avatarModel.position.lerp(targetModelPos, 0.9);
 
     let deltaPelvis = new THREE.Quaternion();
 
     if (avatarBones.hips) {
-        if(avatarBones.hips.parent) {
-            // CORRECTION: On n'utilise plus la position absolue de l'IA.
-            // On calcule juste de combien de cm le prof a bougé par rapport à la Frame 0.
-            const deltaPos = midHip.clone().sub(baseMediaHip);
-            
-            // On additionne cette différence à la hauteur naturelle de l'avatar.
-            const targetPos = baseHipLocalPos.clone().add(deltaPos);
-            avatarBones.hips.position.lerp(targetPos, 0.9);
-        }
-
-        const currentPelvisQuat = computeBasis(hL, hR, midHip, midShoulder);
+        // Rotation contrainte (Pas de basculement en avant !)
+        const currentPelvisQuat = computeRootBasis(hL, hR);
         deltaPelvis = currentPelvisQuat.clone().multiply(basePelvisQuat.clone().invert());
         
         const targetHipsGlobal = deltaPelvis.clone().multiply(avatarBones.hips.userData.initialWorldQuat);
@@ -393,8 +376,8 @@ function applyPose(frame) {
         avatarBones.hips.updateMatrixWorld(true);
     }
 
-    applyInheritedKinematics(avatarBones.spine, restDirs.spine, midHip, midShoulder, deltaPelvis);
-    applyInheritedKinematics(avatarBones.neck, restDirs.neck, midShoulder, nose, deltaPelvis);
+    applyInheritedKinematics(avatarBones.spine, restDirs.spine, midHip, new THREE.Vector3().addVectors(sL, sR).multiplyScalar(0.5), deltaPelvis);
+    applyInheritedKinematics(avatarBones.neck, restDirs.neck, new THREE.Vector3().addVectors(sL, sR).multiplyScalar(0.5), nose, deltaPelvis);
     
     applyInheritedKinematics(avatarBones.leftShoulder, restDirs.leftShoulder, sL, eL, deltaPelvis);
     applyInheritedKinematics(avatarBones.leftElbow, restDirs.leftElbow, eL, wL, deltaPelvis);
