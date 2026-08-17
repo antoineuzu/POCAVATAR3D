@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hdance - Full Fluid Motion & Spatial Tracking</title>
+    <title>Hdance - Upright Posture & Full Body Tracking</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; background-color: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; overflow: hidden; }
         #top-half { display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0; }
@@ -30,14 +30,14 @@
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
     <div id="canvas-container">
-        <div id="loading">Démonte-brides & Restauration de la fluidité...</div>
+        <div id="loading">Redressement vertical et calage des pieds...</div>
     </div>
 </div>
 
 <div id="bottom-half">
     <div id="controls-panel">
         <h3 style="margin:0; color:#fff;">⚙️ Contrôles</h3>
-        <p style="font-size: 11px; color: #aaa; margin: 0;">Mouvements 3D complets, ancrage sol et cinématique fluide.</p>
+        <p style="font-size: 11px; color: #aaa; margin: 0;">Avatar vertical, pieds visibles, cinématique fluide.</p>
         <button id="btn-debug-skeleton" class="btn-action" style="background:#ffaa00; color:#000; margin-top: 10px;">🦴 Afficher Lignes Squelette</button>
         <button id="btn-toggle-mesh" class="btn-action" style="background:#444; color:#fff;">👻 Masquer la peau 3D</button>
     </div>
@@ -65,7 +65,7 @@ const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 
 const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
-camera.position.set(0, 1.3, 4.5); 
+camera.position.set(0, 1.2, 4.8); // Recul léger de la caméra pour cadrer les pieds
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(container.clientWidth, container.clientHeight);
@@ -122,7 +122,9 @@ let baseModelPos = null;
 let baseHipLocalPos = null;
 let baseHipToFootDist = null;
 
-const SMOOTH_FACTOR = 0.2; // Lissage fluide sans latence
+let globalTiltCorrection = new THREE.Quaternion(); // Correction d'inclinaison globale
+
+const SMOOTH_FACTOR = 0.2; 
 
 // ==========================================
 // 4. CHARGEMENT ASYNCHRONE
@@ -182,7 +184,7 @@ fetch('./studio_config.json')
         studioConfig = data;
         checkAutoStart();
     }).catch(err => {
-        logPanel.innerText = "Mode détection dynamique actif.";
+        logPanel.innerText = "Chargement...";
     });
 
 // ==========================================
@@ -234,7 +236,6 @@ function projectToFloor(normX, normY) {
     return new THREE.Vector2(X_meters, Z_meters); 
 }
 
-// 🔴 BASSIN TOTALEMENT LIBRE (Calcule la vraie inclinaison 3D des hanches et du torse)
 function compute3DRootBasis(hL, hR, midHip, midShoulder) {
     const x = new THREE.Vector3().subVectors(hR, hL).normalize(); 
     const y = new THREE.Vector3().subVectors(midShoulder, midHip).normalize(); 
@@ -261,10 +262,19 @@ function extractRestDirections() {
     baseGroundRefY2D = getLowestY2D(frame0);
     baseProjectedPos = projectToFloor(midAnkleX0, baseGroundRefY2D);
     baseModelPos = avatarModel.position.clone();
-    
+
+    // 🔴 REDRESSEMENT PERMANENT DU BUSTE : Calcul du biais de la caméra sur Frame 0
     const pHL0 = getPoint(frame0, 11);
     const pHR0 = getPoint(frame0, 12);
+    const pSL0 = getPoint(frame0, 3);
+    const pSR0 = getPoint(frame0, 4);
     const pMidHip0 = new THREE.Vector3().addVectors(pHL0, pHR0).multiplyScalar(0.5);
+    const pMidShoulder0 = new THREE.Vector3().addVectors(pSL0, pSR0).multiplyScalar(0.5);
+    
+    const initialSpineVec = new THREE.Vector3().subVectors(pMidShoulder0, pMidHip0).normalize();
+    const uprightSpineVec = new THREE.Vector3(initialSpineVec.x, initialSpineVec.y, 0).normalize();
+    globalTiltCorrection.setFromUnitVectors(initialSpineVec, uprightSpineVec);
+    
     const aL0 = getPoint(frame0, 15);
     const aR0 = getPoint(frame0, 16);
     const lowestAnkleY0 = Math.max(aL0.y, aR0.y); 
@@ -286,7 +296,7 @@ function extractRestDirections() {
     restDirs.rightKnee = new THREE.Vector3().subVectors(getWPos(avatarBones.rightFoot), getWPos(avatarBones.rightKnee)).normalize();
 
     document.getElementById('loading').style.display = 'none';
-    logPanel.innerText = `✅ Moteur sans brides chargé. Déhanché et bras fluides activés.`;
+    logPanel.innerText = `✅ Modèle redressé. Les pieds sont visibles sur le sol.`;
 }
 
 function checkAutoStart() {
@@ -316,14 +326,14 @@ player.addEventListener('timeupdate', () => {
         currentVideoTime = time;
         lastSyncRealTime = performance.now();
         if (!isVideoPlaying) {
-            const frame = posesData.find(p => Math.abs(p[0] - currentVideoTime) < 0.04) || posesData[Math.floor(displayTime * 25) % posesData.length];
+            const frame = posesData.find(p => Math.abs(p[0] - currentVideoTime) < 0.04) || posesData[Math.floor(currentVideoTime * 25) % posesData.length];
             if (frame) applyPose(frame);
         }
     });
 });
 
 // ==========================================
-// 7. VRAIE CINÉMATIQUE HIÉRARCHIQUE (FK)
+// 7. CINÉMATIQUE SOUPLE ET DROITE
 // ==========================================
 function applyInheritedKinematics(bone, restDir, targetDir, parentDeltaQuat) {
     if (!bone || !restDir || !targetDir || !parentDeltaQuat) return parentDeltaQuat;
@@ -376,7 +386,7 @@ function alignFootToGround(footBone, heelMP, toeMP, rootDeltaQuat) {
 function applyPose(frame) {
     if (!frame || !avatarModel || !basePelvisQuat) return;
 
-    // 🔴 1. POSITION SPATIALE ÉTALONNÉE
+    // 1. POSITION SPATIALE
     const ankleL = getScreenPoint(frame, 15);
     const ankleR = getScreenPoint(frame, 16);
     const midAnkleX = (ankleL.x + ankleR.x) / 2;
@@ -387,12 +397,9 @@ function applyPose(frame) {
     const deltaZ = currProjectedPos.y - (baseProjectedPos ? baseProjectedPos.y : 0);
 
     const targetPos = baseModelPos.clone();
-    
-    // Échelle d'envergure exacte
     targetPos.x += deltaX * (studioConfig ? 1.0 : 2.5); 
     targetPos.z += deltaZ * (studioConfig ? 1.0 : 1.0); 
     
-    // 🔴 Anti-sautillement : Zone morte de 3cm pour éviter les micro-rebonds de caméra
     const deltaY = baseGroundRefY2D - currentLowestY2D;
     if (deltaY > 0.03) {
         targetPos.y += (deltaY - 0.03) * 1.5;
@@ -402,7 +409,7 @@ function applyPose(frame) {
 
     avatarModel.position.lerp(targetPos, SMOOTH_FACTOR);
 
-    // 🔴 2. EXTRACTION DES POINTS DE CORPS (MediaPipe 3D Complet)
+    // 2. EXTRACTION ET REDRESSEMENT
     const nose = getPoint(frame, 0);
     const sL = getPoint(frame, 3), sR = getPoint(frame, 4);
     const eL = getPoint(frame, 5), eR = getPoint(frame, 6);
@@ -414,11 +421,10 @@ function applyPose(frame) {
     const midHip = new THREE.Vector3().addVectors(pHL, pHR).multiplyScalar(0.5);
     const midShoulder = new THREE.Vector3().addVectors(sL, sR).multiplyScalar(0.5);
 
-    // 🔴 3. DÉHANCHÉ ET HIP DROP
+    // 3. HIP DROP ET BASSIN
     if (avatarBones.hips && baseHipLocalPos) {
         const lowestAnkleY = Math.max(aL.y, aR.y); 
         const currentHipToFootDist = Math.abs(midHip.y - lowestAnkleY);
-        
         const deltaHeight = currentHipToFootDist - baseHipToFootDist;
         const targetHipPos = baseHipLocalPos.clone();
         
@@ -429,9 +435,10 @@ function applyPose(frame) {
     let deltaPelvis = new THREE.Quaternion();
 
     if (avatarBones.hips) {
-        // Vrai déhanché 3D
         const currentPelvisQuat = compute3DRootBasis(pHL, pHR, midHip, midShoulder);
-        deltaPelvis = currentPelvisQuat.clone().multiply(basePelvisQuat.clone().invert());
+        // Application de la correction de redressement globale au bassin
+        const correctedPelvisQuat = globalTiltCorrection.clone().multiply(currentPelvisQuat);
+        deltaPelvis = correctedPelvisQuat.clone().multiply(basePelvisQuat.clone().invert());
         
         const targetHipsGlobal = deltaPelvis.clone().multiply(avatarBones.hips.userData.initialWorldQuat);
         if (avatarBones.hips.parent) avatarBones.hips.parent.updateMatrixWorld(true);
@@ -444,21 +451,20 @@ function applyPose(frame) {
         avatarBones.hips.updateMatrixWorld(true);
     }
 
-    // 🔴 4. CHAÎNAGE DES MEMBRES (FK)
-    const spineDir = new THREE.Vector3().subVectors(midShoulder, midHip).normalize();
-    const neckDir = new THREE.Vector3().subVectors(nose, midShoulder).normalize();
+    // 4. MEMBRES SOUPLES
+    const spineDir = new THREE.Vector3().subVectors(midShoulder, midHip).applyQuaternion(globalTiltCorrection).normalize();
+    const neckDir = new THREE.Vector3().subVectors(nose, midShoulder).applyQuaternion(globalTiltCorrection).normalize();
 
-    const lShoulderDir = new THREE.Vector3().subVectors(eL, sL).normalize();
-    const lElbowDir = new THREE.Vector3().subVectors(wL, eL).normalize();
-    const rShoulderDir = new THREE.Vector3().subVectors(eR, sR).normalize();
-    const rElbowDir = new THREE.Vector3().subVectors(wR, eR).normalize();
+    const lShoulderDir = new THREE.Vector3().subVectors(eL, sL).applyQuaternion(globalTiltCorrection).normalize();
+    const lElbowDir = new THREE.Vector3().subVectors(wL, eL).applyQuaternion(globalTiltCorrection).normalize();
+    const rShoulderDir = new THREE.Vector3().subVectors(eR, sR).applyQuaternion(globalTiltCorrection).normalize();
+    const rElbowDir = new THREE.Vector3().subVectors(wR, eR).applyQuaternion(globalTiltCorrection).normalize();
     
-    const lHipDir = new THREE.Vector3().subVectors(kL, pHL).normalize();
-    const lKneeDir = new THREE.Vector3().subVectors(aL, kL).normalize();
-    const rHipDir = new THREE.Vector3().subVectors(kR, pHR).normalize();
-    const rKneeDir = new THREE.Vector3().subVectors(aR, kR).normalize();
+    const lHipDir = new THREE.Vector3().subVectors(kL, pHL).applyQuaternion(globalTiltCorrection).normalize();
+    const lKneeDir = new THREE.Vector3().subVectors(aL, kL).applyQuaternion(globalTiltCorrection).normalize();
+    const rHipDir = new THREE.Vector3().subVectors(kR, pHR).applyQuaternion(globalTiltCorrection).normalize();
+    const rKneeDir = new THREE.Vector3().subVectors(aR, kR).applyQuaternion(globalTiltCorrection).normalize();
 
-    // Propagation des rotations : Bassin -> Dos -> Épaules -> Coudes
     const deltaSpine = applyInheritedKinematics(avatarBones.spine, restDirs.spine, spineDir, deltaPelvis);
     applyInheritedKinematics(avatarBones.neck, restDirs.neck, neckDir, deltaSpine);
     
@@ -474,7 +480,6 @@ function applyPose(frame) {
     const deltaRHip = applyInheritedKinematics(avatarBones.rightHip, restDirs.rightHip, rHipDir, deltaPelvis);
     applyInheritedKinematics(avatarBones.rightKnee, restDirs.rightKnee, rKneeDir, deltaRHip);
 
-    // Chevilles
     const heelL = getPoint(frame, 29), heelR = getPoint(frame, 30);
     const toeL = getPoint(frame, 31), toeR = getPoint(frame, 32);
 
@@ -484,7 +489,7 @@ function applyPose(frame) {
     avatarModel.updateMatrixWorld(true);
     skinnedMeshes.forEach(mesh => { if (mesh.skeleton) mesh.skeleton.update(); });
 
-    // 🔴 5. COLLISION AU SOL (Anti-enfoncement)
+    // 5. ANCRAGE VISUEL DES PIEDS
     if (avatarBones.leftFoot && avatarBones.rightFoot) {
         avatarBones.leftFoot.updateMatrixWorld(true);
         avatarBones.rightFoot.updateMatrixWorld(true);
@@ -494,8 +499,8 @@ function applyPose(frame) {
         
         const lowestFootY = Math.min(lfPos.y, rfPos.y);
         
-        if (lowestFootY < 0.05) {
-            avatarModel.position.y += (0.05 - lowestFootY); 
+        if (lowestFootY < 0.02) {
+            avatarModel.position.y += (0.02 - lowestFootY); 
             avatarModel.updateMatrixWorld(true);
         }
     }
