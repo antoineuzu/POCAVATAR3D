@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scanner et Diagnostic GLB</title>
+    <style>
+        body, html { margin: 0; padding: 20px; height: 100%; background-color: #111; color: #fff; font-family: sans-serif; box-sizing: border-box; }
+        h2 { color: #00ffcc; margin-top: 0; }
+        p { color: #aaa; font-size: 14px; }
+        #output { width: 100%; height: calc(100% - 100px); background: #050505; color: #00ff66; font-family: 'Courier New', monospace; font-size: 13px; padding: 15px; border: 1px solid #333; overflow-y: auto; white-space: pre-wrap; box-sizing: border-box; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+</head>
+<body>
+
+    <h2>🔍 Scanner d'Armature GLB</h2>
+    <p>Copie l'intégralité du texte vert ci-dessous et colle-le moi dans notre conversation.</p>
+    
+    <textarea id="output" readonly>Analyse en cours du fichier 1.glb...</textarea>
+
+<script>
+    const outputElement = document.getElementById('output');
+    let report = "";
+
+    function addLog(text) {
+        report += text + "\n";
+        outputElement.value = report;
+    }
+
+    // Fonction récursive pour dessiner l'arbre
+    function buildTree(node, depth = 0) {
+        const indent = "│   ".repeat(depth);
+        const isBone = node.isBone ? " 🦴 [BONE]" : "";
+        const isMesh = node.isSkinnedMesh ? " 👻 [SKINNED MESH]" : (node.isMesh ? " 🧊 [MESH]" : "");
+        
+        let nodeInfo = `${indent}├─ ${node.name || 'Unnamed'} (${node.type})${isBone}${isMesh}`;
+        
+        if (node.isSkinnedMesh && node.skeleton) {
+            nodeInfo += ` -> Attaché à un squelette de ${node.skeleton.bones.length} os.`;
+        }
+        
+        addLog(nodeInfo);
+        node.children.forEach(child => buildTree(child, depth + 1));
+    }
+
+    const loader = new THREE.GLTFLoader();
+    
+    loader.load('./1.glb', (gltf) => {
+        addLog("=========================================");
+        addLog("       DIAGNOSTIC DU FICHIER 1.GLB       ");
+        addLog("=========================================\n");
+
+        addLog("--- 1. HIÉRARCHIE COMPLÈTE DU MODÈLE ---");
+        buildTree(gltf.scene);
+
+        addLog("\n--- 2. LISTE PLATE DES OS (Bones) ---");
+        const bonesList = [];
+        gltf.scene.traverse((node) => {
+            if (node.isBone) {
+                bonesList.push(node.name);
+            }
+        });
+
+        if (bonesList.length === 0) {
+            addLog("ERREUR CRITIQUE : Aucun objet de type 'Bone' détecté. Le fichier n'est pas riggé pour Three.js.");
+        } else {
+            bonesList.forEach((b, i) => addLog(`${i + 1}. ${b}`));
+            addLog(`\nTotal : ${bonesList.length} os détectés.`);
+        }
+
+    }, undefined, (error) => {
+        addLog(`\n❌ ERREUR DE CHARGEMENT : Impossible de lire 1.glb. Détails : ${error.message}`);
+    });
+</script>
+
+</body>
+</html>
