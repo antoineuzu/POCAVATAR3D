@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hdance - Timeline Sync Fix</title>
+    <title>Hdance - Anti-Freeze & Sync Fix</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; background-color: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; overflow: hidden; }
         #top-half { display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0; }
@@ -30,7 +30,7 @@
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
     <div id="canvas-container">
-        <div id="loading">Synchronisation avec la vidéo en cours...</div>
+        <div id="loading">Désactivation du Frustum Culling...</div>
     </div>
 </div>
 
@@ -117,18 +117,26 @@ const restDirs = {};
 let basePelvisQuat = null;
 
 // ==========================================
-// 4. CHARGEMENT ASYNCHRONE
+// 4. CHARGEMENT ANTI-GEL (FRUSTUM CULLING OFF)
 // ==========================================
 new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     avatarModel = gltf.scene;
     if (gltf.animations) gltf.animations = [];
 
+    // Empêche l'objet racine de disparaître
+    avatarModel.frustumCulled = false;
     avatarModel.updateMatrixWorld(true);
 
     avatarModel.traverse((node) => {
+        // ANTI-FREEZE : Interdit au moteur de désactiver le calcul de la peau
+        if (node.isMesh || node.isSkinnedMesh) {
+            node.frustumCulled = false; 
+        }
+
         if (node.isSkinnedMesh) {
             skinnedMeshes.push(node);
         }
+        
         if (node.isBone) {
             for (const [logicalName, exactName] of Object.entries(BONE_DICTIONARY)) {
                 if (node.name === exactName) {
@@ -168,7 +176,10 @@ fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
 // ==========================================
 function getWPos(bone) {
     const p = new THREE.Vector3();
-    if(bone) bone.getWorldPosition(p);
+    if(bone) {
+        bone.updateMatrixWorld(true); // Sécurité matrice
+        bone.getWorldPosition(p);
+    }
     return p;
 }
 
@@ -201,7 +212,7 @@ function extractRestDirections() {
     restDirs.rightHip = new THREE.Vector3().subVectors(getWPos(avatarBones.rightKnee), hR).normalize();
     restDirs.rightKnee = new THREE.Vector3().subVectors(getWPos(avatarBones.rightFoot), getWPos(avatarBones.rightKnee)).normalize();
     
-    logPanel.innerText = `✅ Modèle calé.\nAppuyez sur 'Lancer Vidéo / 3D' ou interagissez avec le lecteur vidéo pour démarrer.`;
+    logPanel.innerText = `✅ Modèle calé et Frustum Culling désactivé.\nAppuyez sur 'Lancer' ou le lecteur vidéo.`;
 }
 
 function checkAutoStart() {
@@ -213,24 +224,33 @@ function checkAutoStart() {
 }
 
 // ==========================================
-// 6. SYNCHRONISATION TIMELINE (CORRECTION)
+// 6. SYNCHRONISATION TIMELINE SÉCURISÉE
 // ==========================================
 let currentVideoTime = 0;
 let isVideoPlaying = false;
 const player = Stream(document.getElementById('stream-player'));
 
-// Écoute les événements du SDK de Cloudflare
 player.addEventListener('play', () => { isVideoPlaying = true; });
 player.addEventListener('pause', () => { isVideoPlaying = false; });
-player.addEventListener('timeupdate', () => { 
-    // On force la récupération du temps direct depuis le player (méthode 100% fiable)
-    player.currentTime.then(time => {
-        currentVideoTime = time;
-    });
+
+// On écoute le timeupdate pour mettre à jour le temps de façon robuste
+player.addEventListener('timeupdate', (data) => { 
+    if (data && data.currentTime !== undefined) {
+        currentVideoTime = parseFloat(data.currentTime);
+    }
 });
 
+// Sync de secours forcée par polling (Au cas où timeupdate plante)
+setInterval(() => {
+    if (isVideoPlaying && player) {
+        player.currentTime.then(time => {
+            currentVideoTime = parseFloat(time);
+        }).catch(() => {});
+    }
+}, 100);
+
 // ==========================================
-// 7. MOTEUR CINÉMATIQUE
+// 7. MOTEUR CINÉMATIQUE SANS LAG
 // ==========================================
 function getPoint(frame, k) {
     const idx = 133 + (k * 3);
@@ -240,6 +260,9 @@ function getPoint(frame, k) {
 function applyInheritedKinematics(bone, restDir, pStart, pEnd, rootDeltaQuat) {
     if (!bone || !restDir || !pStart || !pEnd || !rootDeltaQuat) return;
     
+    // Mettre à jour la matrice du parent AVANT de calculer la suite
+    if (bone.parent) bone.parent.updateMatrixWorld(true);
+
     const targetDir = new THREE.Vector3().subVectors(pEnd, pStart).normalize();
     const inheritedBaseDir = restDir.clone().applyQuaternion(rootDeltaQuat).normalize();
     const bendingQuat = new THREE.Quaternion().setFromUnitVectors(inheritedBaseDir, targetDir);
@@ -255,6 +278,9 @@ function applyInheritedKinematics(bone, restDir, pStart, pEnd, rootDeltaQuat) {
     } else {
         bone.quaternion.slerp(targetWorldQuat, 0.9);
     }
+    
+    // Forcer la mise à jour de l'os lui-même
+    bone.updateMatrixWorld(true);
 }
 
 function applyPose(frame) {
@@ -288,11 +314,14 @@ function applyPose(frame) {
         deltaPelvis = currentPelvisQuat.clone().multiply(basePelvisQuat.clone().invert());
         
         const targetHipsGlobal = deltaPelvis.clone().multiply(avatarBones.hips.userData.initialWorldQuat);
+        
+        if (avatarBones.hips.parent) avatarBones.hips.parent.updateMatrixWorld(true);
         const parentQuat = new THREE.Quaternion();
         if(avatarBones.hips.parent) avatarBones.hips.parent.getWorldQuaternion(parentQuat);
         
         const targetHipsLocal = parentQuat.invert().multiply(targetHipsGlobal);
         avatarBones.hips.quaternion.slerp(targetHipsLocal, 0.9);
+        avatarBones.hips.updateMatrixWorld(true);
     }
 
     applyInheritedKinematics(avatarBones.spine, restDirs.spine, midHip, midShoulder, deltaPelvis);
@@ -308,7 +337,7 @@ function applyPose(frame) {
     applyInheritedKinematics(avatarBones.rightHip, restDirs.rightHip, hR, kR, deltaPelvis);
     applyInheritedKinematics(avatarBones.rightKnee, restDirs.rightKnee, kR, aR, deltaPelvis);
 
-    // Obligatoire pour forcer l'affichage de la peau en mouvement !
+    // Obligatoire pour forcer l'affichage
     skinnedMeshes.forEach(mesh => {
         if (mesh.skeleton) mesh.skeleton.update();
     });
@@ -316,20 +345,16 @@ function applyPose(frame) {
     if(skeletonHelper) skeletonHelper.update();
 }
 
-// Boucle fluide
 function animate() {
     requestAnimationFrame(animate);
     
     if (posesData.length > 0) {
-        // Recherche stricte de la frame liée au temps exact de la vidéo
         const frame = posesData.find(p => Math.abs(p[0] - currentVideoTime) < 0.04) || posesData[Math.floor(currentVideoTime * 25) % posesData.length];
         
         if (frame) {
             applyPose(frame);
-            if (isVideoPlaying && Math.floor(currentVideoTime * 10) % 10 === 0) {
-                logPanel.innerText = `▶ Lecture en cours : ${currentVideoTime.toFixed(2)}s`;
-            } else if (!isVideoPlaying && currentVideoTime > 0) {
-                logPanel.innerText = `⏸ En pause à : ${currentVideoTime.toFixed(2)}s`;
+            if (isVideoPlaying) {
+                logPanel.innerText = `▶ Synchro en cours : ${currentVideoTime.toFixed(2)}s\nFrustum Culling OFF / Matrices OK`;
             }
         }
     }
@@ -347,7 +372,7 @@ btnPlay.addEventListener('click', () => {
         player.pause(); 
         btnPlay.innerText = "▶ Lancer Vidéo / 3D";
     } else {
-        player.play().catch(e => console.log("Erreur de lecture :", e)); 
+        player.play().catch(e => console.log("Erreur lecture auto :", e)); 
         btnPlay.innerText = "⏸ Pause Vidéo / 3D";
     }
 });
