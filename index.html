@@ -3,17 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hdance - Anti-Freeze & Sync Fix</title>
+    <title>Hdance - Overlay Vidéo & Chrono Interne</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; background-color: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; overflow: hidden; }
-        #top-half { display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0; }
-        #video-container { flex: 1; background: #000; border-right: 2px solid #333; }
-        iframe { width: 100%; height: 100%; border: none; }
-        #canvas-container { flex: 1; position: relative; background: #1a1a1a; }
+        
+        /* SYSTÈME D'OVERLAY (SUPERPOSITION) */
+        #main-view { flex: 1; position: relative; background: #000; display: flex; justify-content: center; align-items: center; overflow: hidden; }
+        
+        /* La vidéo en fond */
+        #video-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+        iframe { width: 100%; height: 100%; border: none; pointer-events: auto; }
+        
+        /* Le Canvas 3D par-dessus (transparent) */
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; /* Laisse passer les clics vers la vidéo */ }
+        
         #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #00ffcc; font-weight: bold; text-align: center; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 8px; border: 1px solid #00ffcc; z-index: 10;}
-        #bottom-half { height: 250px; display: flex; background: #0a0a0a; }
+        
+        #bottom-half { height: 200px; display: flex; background: #0a0a0a; border-top: 2px solid #333; z-index: 5; }
         #controls-panel { width: 300px; padding: 15px; border-right: 2px solid #333; display: flex; flex-direction: column; gap: 10px; }
-        .btn-action { background: #00ffcc; color: #000; padding: 10px; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; }
+        .btn-action { background: #00ffcc; color: #000; padding: 10px; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; pointer-events: auto; }
         .btn-action:hover { background: #00cca3; }
         #log-panel { flex: 1; padding: 15px; overflow-y: auto; font-family: monospace; font-size: 12px; color: #0f0; white-space: pre-wrap; line-height: 1.4; background: #050505;}
     </style>
@@ -25,21 +33,21 @@
 </head>
 <body>
 
-<div id="top-half">
+<div id="main-view">
     <div id="video-container">
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
     <div id="canvas-container">
-        <div id="loading">Désactivation du Frustum Culling...</div>
+        <div id="loading">Chargement et fusion des vues...</div>
     </div>
 </div>
 
 <div id="bottom-half">
     <div id="controls-panel">
-        <h3 style="margin:0; color:#fff;">⚙️ Contrôles 3D</h3>
-        <button id="btn-force-play" class="btn-action">▶ Lancer Vidéo / 3D</button>
-        <button id="btn-debug-spheres" class="btn-action" style="background:#ffaa00; color:#000;">Afficher Sphères IA</button>
-        <button id="btn-debug-skeleton" class="btn-action" style="background:#444; color:#fff;">Afficher Lignes Squelette</button>
+        <h3 style="margin:0; color:#fff;">⚙️ Contrôles</h3>
+        <button id="btn-force-play" class="btn-action">▶ Démarrer le Moteur 3D</button>
+        <button id="btn-debug-skeleton" class="btn-action" style="background:#ffaa00; color:#000;">🦴 Afficher Lignes Squelette</button>
+        <p style="font-size: 10px; color: #aaa;">Astuce : Lancez la vidéo, puis cliquez sur "Démarrer le Moteur 3D" en même temps.</p>
     </div>
     <div id="log-panel">Attente du système...</div>
 </div>
@@ -49,56 +57,37 @@
 // 1. DICTIONNAIRE EXACT META-HUMAN
 // ==========================================
 const BONE_DICTIONARY = {
-    hips: "DHIbodypelvis_04",
-    spine: "DHIbodyspine_01_05",
-    neck: "DHIbodyneck_01_010",
-    head: "DHIbodyhead_012",
-    leftShoulder: "DHIbodyupperarm_l_014",
-    rightShoulder: "DHIbodyupperarm_r_0145",
-    leftElbow: "DHIbodylowerarm_l_015",
-    rightElbow: "DHIbodylowerarm_r_0146",
-    leftHand: "DHIbodyhand_l_016",
-    rightHand: "DHIbodyhand_r_0147",
-    leftHip: "DHIbodythigh_l_0277",
-    rightHip: "DHIbodythigh_r_0310",
-    leftKnee: "DHIbodycalf_l_0278",
-    rightKnee: "DHIbodycalf_r_0311",
-    leftFoot: "DHIbodyfoot_l_0279",
-    rightFoot: "DHIbodyfoot_r_0312"
+    hips: "DHIbodypelvis_04", spine: "DHIbodyspine_01_05", neck: "DHIbodyneck_01_010", head: "DHIbodyhead_012",
+    leftShoulder: "DHIbodyupperarm_l_014", rightShoulder: "DHIbodyupperarm_r_0145",
+    leftElbow: "DHIbodylowerarm_l_015", rightElbow: "DHIbodylowerarm_r_0146",
+    leftHand: "DHIbodyhand_l_016", rightHand: "DHIbodyhand_r_0147",
+    leftHip: "DHIbodythigh_l_0277", rightHip: "DHIbodythigh_r_0310",
+    leftKnee: "DHIbodycalf_l_0278", rightKnee: "DHIbodycalf_r_0311",
+    leftFoot: "DHIbodyfoot_l_0279", rightFoot: "DHIbodyfoot_r_0312"
 };
 
 // ==========================================
-// 2. SCÈNE 3D
+// 2. SCÈNE 3D (TRANSPARENTE)
 // ==========================================
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
+// Caméra calée pour correspondre à peu près à la vue vidéo
 const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
-camera.position.set(0, 1.5, 4.0);
+camera.position.set(0, 1.0, 3.5);
 
+// Alpha: true permet de voir la vidéo au travers !
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setSize(container.clientWidth, container.clientHeight);
+renderer.setClearColor(0x000000, 0); // Fond 100% transparent
 container.appendChild(renderer.domElement);
 
-const controls = new THREE.OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 1, 0);
+// On désactive OrbitControls car on veut un calque fixe sur la vidéo
+// const controls = new THREE.OrbitControls(camera, renderer.domElement);
 
-scene.add(new THREE.AmbientLight(0xffffff, 1.2));
-const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
-dirLight.position.set(2, 5, 2);
+scene.add(new THREE.AmbientLight(0xffffff, 1.5));
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+dirLight.position.set(0, 5, 5);
 scene.add(dirLight);
-scene.add(new THREE.GridHelper(10, 10, 0x333333, 0x222222));
-
-const debugSpheres = [];
-const sphereGeo = new THREE.SphereGeometry(0.03, 16, 16);
-const matRed = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-const matGreen = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-
-for(let i = 0; i < 21; i++) {
-    const mesh = new THREE.Mesh(sphereGeo, i % 2 !== 0 ? matRed : matGreen);
-    mesh.visible = false;
-    scene.add(mesh);
-    debugSpheres.push(mesh);
-}
 
 // ==========================================
 // 3. VARIABLES DE SYNCHRONISATION
@@ -117,25 +106,17 @@ const restDirs = {};
 let basePelvisQuat = null;
 
 // ==========================================
-// 4. CHARGEMENT ANTI-GEL (FRUSTUM CULLING OFF)
+// 4. CHARGEMENT ASYNCHRONE
 // ==========================================
 new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     avatarModel = gltf.scene;
     if (gltf.animations) gltf.animations = [];
 
-    // Empêche l'objet racine de disparaître
-    avatarModel.frustumCulled = false;
     avatarModel.updateMatrixWorld(true);
 
     avatarModel.traverse((node) => {
-        // ANTI-FREEZE : Interdit au moteur de désactiver le calcul de la peau
-        if (node.isMesh || node.isSkinnedMesh) {
-            node.frustumCulled = false; 
-        }
-
-        if (node.isSkinnedMesh) {
-            skinnedMeshes.push(node);
-        }
+        if (node.isMesh || node.isSkinnedMesh) node.frustumCulled = false; 
+        if (node.isSkinnedMesh) skinnedMeshes.push(node);
         
         if (node.isBone) {
             for (const [logicalName, exactName] of Object.entries(BONE_DICTIONARY)) {
@@ -154,9 +135,9 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
 
     const bbox = new THREE.Box3().setFromObject(avatarModel);
     const size = bbox.getSize(new THREE.Vector3());
-    if (size.y > 0) avatarModel.scale.setScalar(1.7 / size.y);
+    if (size.y > 0) avatarModel.scale.setScalar(1.8 / size.y);
 
-    avatarModel.position.set(0, 0, 0);
+    avatarModel.position.set(0, -0.8, 0); // Décalage vers le bas pour matcher l'acteur
     scene.add(avatarModel);
     
     isModelReady = true;
@@ -177,7 +158,7 @@ fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
 function getWPos(bone) {
     const p = new THREE.Vector3();
     if(bone) {
-        bone.updateMatrixWorld(true); // Sécurité matrice
+        bone.updateMatrixWorld(true);
         bone.getWorldPosition(p);
     }
     return p;
@@ -212,55 +193,47 @@ function extractRestDirections() {
     restDirs.rightHip = new THREE.Vector3().subVectors(getWPos(avatarBones.rightKnee), hR).normalize();
     restDirs.rightKnee = new THREE.Vector3().subVectors(getWPos(avatarBones.rightFoot), getWPos(avatarBones.rightKnee)).normalize();
     
-    logPanel.innerText = `✅ Modèle calé et Frustum Culling désactivé.\nAppuyez sur 'Lancer' ou le lecteur vidéo.`;
+    document.getElementById('loading').style.display = 'none';
+    logPanel.innerText = `✅ Overlay prêt.\nCliquez sur "Démarrer le Moteur 3D" pour forcer l'animation.`;
 }
 
 function checkAutoStart() {
     if (isModelReady && isJsonReady) {
-        document.getElementById('loading').style.display = 'none';
         extractRestDirections();
         applyPose(posesData[0]); 
     }
 }
 
 // ==========================================
-// 6. SYNCHRONISATION TIMELINE SÉCURISÉE
+// 6. CHRONOMÈTRE INTERNE (Anti-Freeze)
 // ==========================================
-let currentVideoTime = 0;
-let isVideoPlaying = false;
-const player = Stream(document.getElementById('stream-player'));
+let isEngineRunning = false;
+let engineStartTime = 0;
+let simulatedVideoTime = 0;
 
-player.addEventListener('play', () => { isVideoPlaying = true; });
-player.addEventListener('pause', () => { isVideoPlaying = false; });
-
-// On écoute le timeupdate pour mettre à jour le temps de façon robuste
-player.addEventListener('timeupdate', (data) => { 
-    if (data && data.currentTime !== undefined) {
-        currentVideoTime = parseFloat(data.currentTime);
+document.getElementById('btn-force-play').addEventListener('click', (e) => {
+    isEngineRunning = !isEngineRunning;
+    if (isEngineRunning) {
+        engineStartTime = Date.now() - (simulatedVideoTime * 1000);
+        e.target.innerText = "⏸ Mettre en pause 3D";
+        logPanel.innerText = `▶ Moteur 3D forcé en marche !`;
+    } else {
+        e.target.innerText = "▶ Démarrer le Moteur 3D";
     }
 });
-
-// Sync de secours forcée par polling (Au cas où timeupdate plante)
-setInterval(() => {
-    if (isVideoPlaying && player) {
-        player.currentTime.then(time => {
-            currentVideoTime = parseFloat(time);
-        }).catch(() => {});
-    }
-}, 100);
 
 // ==========================================
 // 7. MOTEUR CINÉMATIQUE SANS LAG
 // ==========================================
 function getPoint(frame, k) {
     const idx = 133 + (k * 3);
-    return new THREE.Vector3(frame[idx], -frame[idx+1], -frame[idx+2]);
+    // On inverse X pour faire un effet miroir superposé parfait
+    return new THREE.Vector3(-frame[idx], -frame[idx+1], -frame[idx+2]);
 }
 
 function applyInheritedKinematics(bone, restDir, pStart, pEnd, rootDeltaQuat) {
     if (!bone || !restDir || !pStart || !pEnd || !rootDeltaQuat) return;
     
-    // Mettre à jour la matrice du parent AVANT de calculer la suite
     if (bone.parent) bone.parent.updateMatrixWorld(true);
 
     const targetDir = new THREE.Vector3().subVectors(pEnd, pStart).normalize();
@@ -279,17 +252,11 @@ function applyInheritedKinematics(bone, restDir, pStart, pEnd, rootDeltaQuat) {
         bone.quaternion.slerp(targetWorldQuat, 0.9);
     }
     
-    // Forcer la mise à jour de l'os lui-même
     bone.updateMatrixWorld(true);
 }
 
 function applyPose(frame) {
     if (!frame || !avatarModel || !basePelvisQuat) return;
-
-    for(let i = 0; i < 21; i++) {
-        const pt = getPoint(frame, i);
-        if(debugSpheres[i]) debugSpheres[i].position.copy(pt);
-    }
 
     const nose = getPoint(frame, 0);
     const sL = getPoint(frame, 3), sR = getPoint(frame, 4);
@@ -337,7 +304,6 @@ function applyPose(frame) {
     applyInheritedKinematics(avatarBones.rightHip, restDirs.rightHip, hR, kR, deltaPelvis);
     applyInheritedKinematics(avatarBones.rightKnee, restDirs.rightKnee, kR, aR, deltaPelvis);
 
-    // Obligatoire pour forcer l'affichage
     skinnedMeshes.forEach(mesh => {
         if (mesh.skeleton) mesh.skeleton.update();
     });
@@ -348,13 +314,16 @@ function applyPose(frame) {
 function animate() {
     requestAnimationFrame(animate);
     
-    if (posesData.length > 0) {
-        const frame = posesData.find(p => Math.abs(p[0] - currentVideoTime) < 0.04) || posesData[Math.floor(currentVideoTime * 25) % posesData.length];
+    if (posesData.length > 0 && isEngineRunning) {
+        // Horloge pur JS, indépendante de la vidéo !
+        simulatedVideoTime = (Date.now() - engineStartTime) / 1000;
+        
+        const frame = posesData.find(p => Math.abs(p[0] - simulatedVideoTime) < 0.04) || posesData[Math.floor(simulatedVideoTime * 25) % posesData.length];
         
         if (frame) {
             applyPose(frame);
-            if (isVideoPlaying) {
-                logPanel.innerText = `▶ Synchro en cours : ${currentVideoTime.toFixed(2)}s\nFrustum Culling OFF / Matrices OK`;
+            if (Math.floor(simulatedVideoTime * 10) % 5 === 0) {
+                logPanel.innerText = `▶ Moteur Actif : ${simulatedVideoTime.toFixed(2)}s`;
             }
         }
     }
@@ -365,30 +334,18 @@ animate();
 // ==========================================
 // 8. ÉVÉNEMENTS UI
 // ==========================================
-const btnPlay = document.getElementById('btn-force-play');
-
-btnPlay.addEventListener('click', () => {
-    if (isVideoPlaying) {
-        player.pause(); 
-        btnPlay.innerText = "▶ Lancer Vidéo / 3D";
-    } else {
-        player.play().catch(e => console.log("Erreur lecture auto :", e)); 
-        btnPlay.innerText = "⏸ Pause Vidéo / 3D";
-    }
-});
-
-let spheresVisible = false;
-document.getElementById('btn-debug-spheres').addEventListener('click', (e) => {
-    spheresVisible = !spheresVisible;
-    debugSpheres.forEach(s => s.visible = spheresVisible);
-    e.target.innerText = spheresVisible ? "Masquer Sphères IA" : "Afficher Sphères IA";
-});
-
 document.getElementById('btn-debug-skeleton').addEventListener('click', (e) => {
     if(skeletonHelper) {
         skeletonHelper.visible = !skeletonHelper.visible;
-        e.target.innerText = skeletonHelper.visible ? "Masquer Lignes Squelette" : "Afficher Lignes Squelette";
+        e.target.innerText = skeletonHelper.visible ? "🦴 Masquer Lignes Squelette" : "🦴 Afficher Lignes Squelette";
     }
+});
+
+// Gérer le redimensionnement pour l'overlay
+window.addEventListener('resize', () => {
+    camera.aspect = container.clientWidth / container.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(container.clientWidth, container.clientHeight);
 });
 </script>
 
