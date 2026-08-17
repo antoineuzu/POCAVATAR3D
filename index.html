@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hdance - Kinematics & Mapping Fix</title>
+    <title>Hdance - DHI MetaHuman Fix</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; background-color: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; overflow: hidden; }
         #top-half { display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0; }
@@ -11,11 +11,11 @@
         iframe { width: 100%; height: 100%; border: none; }
         #canvas-container { flex: 1; position: relative; background: #1a1a1a; }
         #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #00ffcc; font-weight: bold; text-align: center; }
-        #bottom-half { height: 250px; display: flex; background: #0a0a0a; }
+        #bottom-half { height: 280px; display: flex; background: #0a0a0a; }
         #controls-panel { width: 300px; padding: 15px; border-right: 2px solid #333; display: flex; flex-direction: column; gap: 10px; }
         .btn-action { background: #00ffcc; color: #000; padding: 10px; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; }
         .btn-action:hover { background: #00cca3; }
-        #log-panel { flex: 1; padding: 15px; overflow-y: auto; font-family: monospace; font-size: 12px; color: #0f0; white-space: pre-wrap; line-height: 1.4; }
+        #log-panel { flex: 1; padding: 15px; overflow-y: auto; font-family: monospace; font-size: 12px; color: #0f0; white-space: pre-wrap; line-height: 1.4; background: #050505;}
         .log-error { color: #ff4444; font-weight: bold; }
         .log-success { color: #00ffcc; }
     </style>
@@ -32,7 +32,7 @@
         <iframe id="stream-player" src="https://customer-q6w3gyg7303v2e4a.cloudflarestream.com/91439178d0ba03300cb99962fd9fbd02/iframe" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen></iframe>
     </div>
     <div id="canvas-container">
-        <div id="loading">Initialisation du moteur de mapping...</div>
+        <div id="loading">Initialisation DHI Fix...</div>
     </div>
 </div>
 
@@ -43,30 +43,31 @@
         <button id="btn-debug-spheres" class="btn-action" style="background:#ffaa00; color:#000;">Afficher/Masquer Sphères IA</button>
         <button id="btn-debug-skeleton" class="btn-action" style="background:#444; color:#fff;">Afficher Lignes Squelette</button>
     </div>
-    <div id="log-panel" style="background: #050505; border-left: 1px solid #333;">Attente du modèle 1.glb...</div>
+    <div id="log-panel">Attente du modèle 1.glb...</div>
 </div>
 
 <script>
 // ==========================================
-// 1. DICTIONNAIRE ÉTENDU (Correction Tête et Jambes)
+// 1. DICTIONNAIRE STRICT (Plus de Root!)
 // ==========================================
 const BONE_DICTIONARY = {
-    hips: ["Hips", "pelvis", "mixamorigHips", "Root"],
-    spine: ["Spine", "spine_01", "mixamorigSpine", "Chest", "chest"],
-    neck: ["Neck", "neck_01", "mixamorigNeck"],
-    head: ["Head", "head_01", "mixamorigHead"], // Ajout de la tête !
-    leftShoulder: ["LeftArm", "upperarm_l", "mixamorigLeftArm", "L_UpperArm", "Shoulder_L"],
-    rightShoulder: ["RightArm", "upperarm_r", "mixamorigRightArm", "R_UpperArm", "Shoulder_R"],
-    leftElbow: ["LeftForeArm", "lowerarm_l", "mixamorigLeftForeArm", "L_Forearm", "Elbow_L"],
-    rightElbow: ["RightForeArm", "lowerarm_r", "mixamorigRightForeArm", "R_Forearm", "Elbow_R"],
-    leftHand: ["LeftHand", "hand_l", "mixamorigLeftHand", "L_Hand", "Hand_L"],
-    rightHand: ["RightHand", "hand_r", "mixamorigRightHand", "R_Hand", "Hand_R"],
-    leftHip: ["LeftUpLeg", "thigh_l", "mixamorigLeftUpLeg", "L_Thigh", "Thigh_L", "Leg_L"],
-    rightHip: ["RightUpLeg", "thigh_r", "mixamorigRightUpLeg", "R_Thigh", "Thigh_R", "Leg_R"],
-    leftKnee: ["LeftLeg", "calf_l", "mixamorigLeftLeg", "L_Calf", "Calf_L", "Knee_L"],
-    rightKnee: ["RightLeg", "calf_r", "mixamorigRightLeg", "R_Calf", "Calf_R", "Knee_R"],
-    leftFoot: ["LeftFoot", "foot_l", "mixamorigLeftFoot", "L_Foot", "Foot_L"],
-    rightFoot: ["RightFoot", "foot_r", "mixamorigRightFoot", "R_Foot", "Foot_R"]
+    // On force la recherche sur 'pelvis' pour éviter _rootJoint
+    hips: ["pelvis", "DHIbodypelvis", "Hips", "mixamorigHips"],
+    spine: ["spine_01", "DHIbodyspine_01", "Spine"],
+    neck: ["neck_01", "DHIbodyneck_01", "Neck"],
+    head: ["head_01", "DHIbodyhead", "Head"],
+    leftShoulder: ["upperarm_l", "DHIbodyupperarm_l", "LeftArm"],
+    rightShoulder: ["upperarm_r", "DHIbodyupperarm_r", "RightArm"],
+    leftElbow: ["lowerarm_l", "DHIbodylowerarm_l", "LeftForeArm"],
+    rightElbow: ["lowerarm_r", "DHIbodylowerarm_r", "RightForeArm"],
+    leftHand: ["hand_l", "DHIbodyhand_l", "LeftHand"],
+    rightHand: ["hand_r", "DHIbodyhand_r", "RightHand"],
+    leftHip: ["thigh_l", "DHIbodythigh_l", "LeftUpLeg"],
+    rightHip: ["thigh_r", "DHIbodythigh_r", "RightUpLeg"],
+    leftKnee: ["calf_l", "DHIbodycalf_l", "LeftLeg"],
+    rightKnee: ["calf_r", "DHIbodycalf_r", "RightLeg"],
+    leftFoot: ["foot_l", "DHIbodyfoot_l", "LeftFoot"],
+    rightFoot: ["foot_r", "DHIbodyfoot_r", "RightFoot"]
 };
 
 // ==========================================
@@ -113,12 +114,10 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     avatarModel = gltf.scene;
     if (gltf.animations) gltf.animations = [];
 
-    // Sauvegarde des os trouvés
     avatarModel.traverse((node) => {
         if (node.isBone) {
             for (const [logicalName, keywords] of Object.entries(BONE_DICTIONARY)) {
                 if (keywords.some(kw => node.name.toLowerCase().includes(kw.toLowerCase()))) {
-                    // On garde la première correspondance trouvée
                     if(!avatarBones[logicalName]) avatarBones[logicalName] = node;
                 }
             }
@@ -138,8 +137,7 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     
     document.getElementById('loading').style.display = 'none';
 
-    // Affichage strict du diagnostic
-    let logs = `<span class="log-success">✅ Modèle chargé (1.glb)</span>\n\n=== DIAGNOSTIC DU SQUELETTE ===\n`;
+    let logs = `<span class="log-success">✅ Modèle DHI chargé (1.glb)</span>\n\n=== DIAGNOSTIC STRICT ===\n`;
     for (const key in BONE_DICTIONARY) {
         if (avatarBones[key]) {
             logs += `[OK] ${key} -> lié à "${avatarBones[key].name}"\n`;
@@ -167,7 +165,7 @@ fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
     });
 
 // ==========================================
-// 5. MOTEUR CINÉMATIQUE
+// 5. MOTEUR CINÉMATIQUE (Adapté DHI)
 // ==========================================
 function getPoint(frame, k) {
     const idx = 133 + (k * 3);
@@ -186,7 +184,8 @@ function applyKinematics(bone, pStart, pEnd, refAxis) {
         globalQuat.premultiply(parentQuat.invert());
     }
     
-    bone.quaternion.slerp(globalQuat, 0.7);
+    // Smooth factor augmenté pour éviter les tremblements
+    bone.quaternion.slerp(globalQuat, 0.6);
 }
 
 function applyPose(frame) {
@@ -211,21 +210,27 @@ function applyPose(frame) {
     const midHip = new THREE.Vector3().addVectors(hL, hR).multiplyScalar(0.5);
     const midShoulder = new THREE.Vector3().addVectors(sL, sR).multiplyScalar(0.5);
 
-    // Déplacement global du modèle sur le bassin IA
-    avatarModel.position.copy(midHip);
+    // On déplace uniquement l'os du bassin S'IL EXISTE, pas tout le modèle
+    if (avatarBones.hips) {
+        if(avatarBones.hips.parent) {
+            const localHipPos = avatarBones.hips.parent.worldToLocal(midHip.clone());
+            avatarBones.hips.position.lerp(localHipPos, 0.8);
+        } else {
+            avatarBones.hips.position.lerp(midHip, 0.8);
+        }
+    }
 
+    // Les squelettes DHI ont souvent des axes locaux en X ou Y. 
     const axisY = new THREE.Vector3(0, 1, 0);
-    const axisNY = new THREE.Vector3(0, -1, 0); 
+    const axisNY = new THREE.Vector3(0, -1, 0);
     const axisX = new THREE.Vector3(1, 0, 0);
     const axisNX = new THREE.Vector3(-1, 0, 0);
     const axisZ = new THREE.Vector3(0, 0, 1);
     
-    // Tête et Buste
     applyKinematics(avatarBones.spine, midHip, midShoulder, axisY);
     applyKinematics(avatarBones.neck, midShoulder, nose, axisY);
-    applyKinematics(avatarBones.head, midShoulder, nose, axisY); // Tête rajoutée
+    applyKinematics(avatarBones.head, midShoulder, nose, axisY);
     
-    // Bras
     applyKinematics(avatarBones.leftShoulder, sL, eL, axisX);
     applyKinematics(avatarBones.leftElbow, eL, wL, axisX);
     applyKinematics(avatarBones.leftHand, wL, iL, axisX);
@@ -234,7 +239,6 @@ function applyPose(frame) {
     applyKinematics(avatarBones.rightElbow, eR, wR, axisNX);
     applyKinematics(avatarBones.rightHand, wR, iR, axisNX);
     
-    // Jambes
     applyKinematics(avatarBones.leftHip, hL, kL, axisNY);
     applyKinematics(avatarBones.leftKnee, kL, aL, axisNY);
     applyKinematics(avatarBones.leftFoot, aL, fL, axisZ);
