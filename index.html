@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hdance - Single Timeline & Inherited Kinematics</title>
+    <title>Hdance - Timeline Sync Fix</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; background-color: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; overflow: hidden; }
         #top-half { display: flex; flex: 1; border-bottom: 2px solid #333; min-height: 0; }
@@ -37,7 +37,7 @@
 <div id="bottom-half">
     <div id="controls-panel">
         <h3 style="margin:0; color:#fff;">⚙️ Contrôles 3D</h3>
-        <p style="font-size: 11px; color: #aaa; margin: 0 0 10px 0;">Contrôlez l'avatar directement depuis le lecteur vidéo.</p>
+        <button id="btn-force-play" class="btn-action">▶ Lancer Vidéo / 3D</button>
         <button id="btn-debug-spheres" class="btn-action" style="background:#ffaa00; color:#000;">Afficher Sphères IA</button>
         <button id="btn-debug-skeleton" class="btn-action" style="background:#444; color:#fff;">Afficher Lignes Squelette</button>
     </div>
@@ -101,10 +101,11 @@ for(let i = 0; i < 21; i++) {
 }
 
 // ==========================================
-// 3. VARIABLES GLOBALES DE SYNCHRONISATION
+// 3. VARIABLES DE SYNCHRONISATION
 // ==========================================
 let avatarModel = null;
 let avatarBones = {};
+let skinnedMeshes = [];
 let skeletonHelper = null;
 const logPanel = document.getElementById('log-panel');
 
@@ -113,10 +114,10 @@ let isModelReady = false;
 let isJsonReady = false;
 
 const restDirs = {};
-let basePelvisQuat = null; // Sauvegarde de la rotation spatiale du bassin T-Pose
+let basePelvisQuat = null;
 
 // ==========================================
-// 4. CHARGEMENT ASYNCHRONE (GLB & JSON)
+// 4. CHARGEMENT ASYNCHRONE
 // ==========================================
 new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     avatarModel = gltf.scene;
@@ -125,6 +126,9 @@ new THREE.GLTFLoader().load('./1.glb', (gltf) => {
     avatarModel.updateMatrixWorld(true);
 
     avatarModel.traverse((node) => {
+        if (node.isSkinnedMesh) {
+            skinnedMeshes.push(node);
+        }
         if (node.isBone) {
             for (const [logicalName, exactName] of Object.entries(BONE_DICTIONARY)) {
                 if (node.name === exactName) {
@@ -160,7 +164,7 @@ fetch('./AI-91439178d0ba03300cb99962fd9fbd02.json')
     });
 
 // ==========================================
-// 5. MATHÉMATIQUES DE VECTEURS (T-POSE 3D)
+// 5. MATHÉMATIQUES & REPERE 3D
 // ==========================================
 function getWPos(bone) {
     const p = new THREE.Vector3();
@@ -168,7 +172,6 @@ function getWPos(bone) {
     return p;
 }
 
-// Calcule l'orientation spatiale stricte (Avant/Haut/Côté)
 function computeBasis(pLeft, pRight, pBottom, pTop) {
     const x = new THREE.Vector3().subVectors(pRight, pLeft).normalize();
     const y = new THREE.Vector3().subVectors(pTop, pBottom).normalize();
@@ -198,7 +201,7 @@ function extractRestDirections() {
     restDirs.rightHip = new THREE.Vector3().subVectors(getWPos(avatarBones.rightKnee), hR).normalize();
     restDirs.rightKnee = new THREE.Vector3().subVectors(getWPos(avatarBones.rightFoot), getWPos(avatarBones.rightKnee)).normalize();
     
-    logPanel.innerText = `✅ Modèles liés avec succès.\nLa timeline 3D est désormais fusionnée avec le lecteur vidéo.`;
+    logPanel.innerText = `✅ Modèle calé.\nAppuyez sur 'Lancer Vidéo / 3D' ou interagissez avec le lecteur vidéo pour démarrer.`;
 }
 
 function checkAutoStart() {
@@ -210,56 +213,45 @@ function checkAutoStart() {
 }
 
 // ==========================================
-// 6. SYNCHRONISATION ABSOLUE (Single Timeline)
+// 6. SYNCHRONISATION TIMELINE (CORRECTION)
 // ==========================================
 let currentVideoTime = 0;
 let isVideoPlaying = false;
-let lastSyncRealTime = performance.now();
 const player = Stream(document.getElementById('stream-player'));
 
-player.addEventListener('playing', () => { 
-    isVideoPlaying = true; 
-    lastSyncRealTime = performance.now(); 
-});
-player.addEventListener('pause', () => { 
-    isVideoPlaying = false; 
-});
-// timeupdate s'exécute quand la vidéo joue, ET quand on déplace le curseur manuellement (scrubbing)
-player.addEventListener('timeupdate', (e) => { 
-    currentVideoTime = e.currentTime; 
-    lastSyncRealTime = performance.now();
+// Écoute les événements du SDK de Cloudflare
+player.addEventListener('play', () => { isVideoPlaying = true; });
+player.addEventListener('pause', () => { isVideoPlaying = false; });
+player.addEventListener('timeupdate', () => { 
+    // On force la récupération du temps direct depuis le player (méthode 100% fiable)
+    player.currentTime.then(time => {
+        currentVideoTime = time;
+    });
 });
 
 // ==========================================
-// 7. MOTEUR CINÉMATIQUE HÉRITÉ (Inherited Kinematics)
+// 7. MOTEUR CINÉMATIQUE
 // ==========================================
 function getPoint(frame, k) {
     const idx = 133 + (k * 3);
     return new THREE.Vector3(frame[idx], -frame[idx+1], -frame[idx+2]);
 }
 
-// Fonction centrale : applique la rotation du bassin PUIS plie le membre vers l'IA
 function applyInheritedKinematics(bone, restDir, pStart, pEnd, rootDeltaQuat) {
     if (!bone || !restDir || !pStart || !pEnd || !rootDeltaQuat) return;
     
     const targetDir = new THREE.Vector3().subVectors(pEnd, pStart).normalize();
-    
-    // 1. Où pointerait l'os si le corps tournait sans que le membre ne bouge ?
     const inheritedBaseDir = restDir.clone().applyQuaternion(rootDeltaQuat).normalize();
-    
-    // 2. Quelle est la flexion locale pour atteindre le point IA ?
     const bendingQuat = new THREE.Quaternion().setFromUnitVectors(inheritedBaseDir, targetDir);
     
-    // 3. Application : Rotation globale de l'os (Orientation initiale * Root Delta * Flexion IA)
     const baseGlobalQuat = rootDeltaQuat.clone().multiply(bone.userData.initialWorldQuat);
     const targetWorldQuat = bendingQuat.multiply(baseGlobalQuat);
     
-    // 4. Conversion locale Three.js
     const parentWorldQuat = new THREE.Quaternion();
     if (bone.parent && bone.parent.isBone) {
         bone.parent.getWorldQuaternion(parentWorldQuat);
         const localQuat = parentWorldQuat.invert().multiply(targetWorldQuat);
-        bone.quaternion.slerp(localQuat, 0.9); // Slerp à 0.9 pour une super fluidité lors du scrubbing
+        bone.quaternion.slerp(localQuat, 0.9);
     } else {
         bone.quaternion.slerp(targetWorldQuat, 0.9);
     }
@@ -287,13 +279,11 @@ function applyPose(frame) {
     let deltaPelvis = new THREE.Quaternion();
 
     if (avatarBones.hips) {
-        // Déplacement du bassin
         if(avatarBones.hips.parent) {
             const localHipPos = avatarBones.hips.parent.worldToLocal(midHip.clone());
             avatarBones.hips.position.lerp(localHipPos, 0.9);
         }
 
-        // Torsion mathématique du bassin
         const currentPelvisQuat = computeBasis(hL, hR, midHip, midShoulder);
         deltaPelvis = currentPelvisQuat.clone().multiply(basePelvisQuat.clone().invert());
         
@@ -305,7 +295,6 @@ function applyPose(frame) {
         avatarBones.hips.quaternion.slerp(targetHipsLocal, 0.9);
     }
 
-    // Le corps hérite désormais de "deltaPelvis" ! Fini les torsions de bras !
     applyInheritedKinematics(avatarBones.spine, restDirs.spine, midHip, midShoulder, deltaPelvis);
     applyInheritedKinematics(avatarBones.neck, restDirs.neck, midShoulder, nose, deltaPelvis);
     
@@ -319,23 +308,30 @@ function applyPose(frame) {
     applyInheritedKinematics(avatarBones.rightHip, restDirs.rightHip, hR, kR, deltaPelvis);
     applyInheritedKinematics(avatarBones.rightKnee, restDirs.rightKnee, kR, aR, deltaPelvis);
 
+    // Obligatoire pour forcer l'affichage de la peau en mouvement !
+    skinnedMeshes.forEach(mesh => {
+        if (mesh.skeleton) mesh.skeleton.update();
+    });
+
     if(skeletonHelper) skeletonHelper.update();
 }
 
-// Boucle fluide calée sur l'horloge vidéo
+// Boucle fluide
 function animate() {
     requestAnimationFrame(animate);
     
     if (posesData.length > 0) {
-        let displayTime = currentVideoTime;
-        // Extrapolation fine entre deux événements de la vidéo si elle est en lecture
-        if (isVideoPlaying) {
-            displayTime += (performance.now() - lastSyncRealTime) / 1000;
+        // Recherche stricte de la frame liée au temps exact de la vidéo
+        const frame = posesData.find(p => Math.abs(p[0] - currentVideoTime) < 0.04) || posesData[Math.floor(currentVideoTime * 25) % posesData.length];
+        
+        if (frame) {
+            applyPose(frame);
+            if (isVideoPlaying && Math.floor(currentVideoTime * 10) % 10 === 0) {
+                logPanel.innerText = `▶ Lecture en cours : ${currentVideoTime.toFixed(2)}s`;
+            } else if (!isVideoPlaying && currentVideoTime > 0) {
+                logPanel.innerText = `⏸ En pause à : ${currentVideoTime.toFixed(2)}s`;
+            }
         }
-
-        // Trouve la frame JSON correspondante au millième de seconde près
-        const frame = posesData.find(p => Math.abs(p[0] - displayTime) < 0.04) || posesData[Math.floor(displayTime * 25) % posesData.length];
-        if (frame) applyPose(frame);
     }
     renderer.render(scene, camera);
 }
@@ -344,6 +340,18 @@ animate();
 // ==========================================
 // 8. ÉVÉNEMENTS UI
 // ==========================================
+const btnPlay = document.getElementById('btn-force-play');
+
+btnPlay.addEventListener('click', () => {
+    if (isVideoPlaying) {
+        player.pause(); 
+        btnPlay.innerText = "▶ Lancer Vidéo / 3D";
+    } else {
+        player.play().catch(e => console.log("Erreur de lecture :", e)); 
+        btnPlay.innerText = "⏸ Pause Vidéo / 3D";
+    }
+});
+
 let spheresVisible = false;
 document.getElementById('btn-debug-spheres').addEventListener('click', (e) => {
     spheresVisible = !spheresVisible;
